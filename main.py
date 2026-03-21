@@ -2,7 +2,6 @@ import os
 import json
 import time
 import requests
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -23,7 +22,9 @@ def send_message(text):
         "to": LINE_TO_ID,
         "messages": [{"type": "text", "text": text}]
     }
-    requests.post(url, headers=headers, json=payload)
+    response = requests.post(url, headers=headers, json=payload)
+    if response.status_code != 200:
+        print(f"❌ แจ้งเตือน LINE ไม่สำเร็จ: {response.text}")
 
 def get_fuel_data():
     print("กำลังเปิดเบราว์เซอร์จำลองเพื่อดึงข้อมูล...")
@@ -33,55 +34,44 @@ def get_fuel_data():
     options.add_argument('--disable-dev-shm-usage')
     
     driver = webdriver.Chrome(options=options)
-    driver.get(DATA_URL)
-    
     stations = {}
     
     try:
-        # 1. รอจนกว่า iframe จะโผล่มา และสลับเข้าไปข้างใน
+        driver.get(DATA_URL)
+        
         print("กำลังรอและมุดเข้า iframe...")
+        # รอให้ iframe ปรากฏ
         iframe = WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.ID, "sandboxFrame"))
         )
         driver.switch_to.frame(iframe)
-        
-        # 2. รอจนกว่าตารางข้อมูลจะโหลดเสร็จ
-        print("มุดเข้า iframe สำเร็จ! กำลังรอข้อมูลตารางน้ำมัน...")
-        tbody = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.ID, "tbody-dash"))
+        print("มุดเข้า iframe สำเร็จ! กำลังรอข้อมูลโหลด...")
+
+        # รอให้ตัวแปร stationsData มีข้อมูล (ข้อมูลถูกดึงมาแล้ว)
+        # เราใช้ JavaScript เพื่อดึงตัวแปรนั้นออกมาตรงๆ เลย จะได้ไม่ต้องแกะ HTML
+        WebDriverWait(driver, 20).until(
+            lambda d: d.execute_script("return typeof stationsData !== 'undefined' && stationsData.length > 0")
         )
         
-        # ให้เวลามันดึงข้อมูลมาเรียงใส่ตารางนิดนึง
-        time.sleep(5)
-        
-        # 3. ดึง HTML ออกมาแปลง
-        html = driver.page_source
-        soup = BeautifulSoup(html, 'html.parser')
-        tbody = soup.find('tbody', id='tbody-dash')
-        
-        if not tbody:
-            print("❌ ไม่พบโครงสร้างตารางข้อมูลใน iframe")
-            return stations
+        # ดึงข้อมูล JSON ออกมาตรงๆ
+        raw_data = driver.execute_script("return stationsData;")
+        print(f"ดึงข้อมูลดิบสำเร็จ พบทั้งหมด {len(raw_data)} ปั๊ม")
 
-        print("กำลังอ่านข้อมูลจากตาราง...")
-        for tr in tbody.find_all('tr'):
-            tds = tr.find_all('td')
-            # ตรวจสอบว่าคอลัมน์ครบตามตารางในหน้าเว็บ
-            if len(tds) >= 9: 
-                name = tds[0].text.strip()
-                diesel = tds[1].text.strip()
-                g95 = tds[2].text.strip()
-                g91 = tds[3].text.strip()
-                e20 = tds[4].text.strip()
-                transport = tds[5].text.strip().replace('\n', ' ') 
-                district = tds[8].text.strip()  # ดึงข้อมูลอำเภอมาเช็ค
-
-                # 4. กรองเอาเฉพาะปั๊มใน 'อินทร์บุรี'
-                if "อินทร์บุรี" in district:
-                    stations[name] = {
-                        "ดีเซล": diesel, "G95": g95, "G91": g91, "E20": e20, "รถขนส่ง": transport, "อำเภอ": district
-                    }
-                    print(f"✅ พบข้อมูล: {name}")
+        for item in raw_data:
+            # ตรวจสอบว่าเป็นปั๊มในอำเภออินทร์บุรีหรือไม่ (เช็คให้ชัวร์ว่าไม่เป็น None)
+            district = str(item.get('District', '')).strip()
+            name = str(item.get('StationName', '')).strip()
+            
+            if name and "อินทร์บุรี" in district:
+                stations[name] = {
+                    "ดีเซล": str(item.get('Diesel', '-')).strip(),
+                    "G95": str(item.get('Gas95', '-')).strip(),
+                    "G91": str(item.get('Gas91', '-')).strip(),
+                    "E20": str(item.get('E20', '-')).strip(),
+                    "รถขนส่ง": str(item.get('TransportStatus', 'ปกติ')).strip(),
+                    "อำเภอ": district
+                }
+                print(f"✅ พบข้อมูล: {name}")
 
     except Exception as e:
         print(f"⚠️ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
@@ -94,7 +84,7 @@ def get_fuel_data():
 def main():
     current_data = get_fuel_data()
     if not current_data:
-        print("⚠️ ไม่ได้ข้อมูลกลับมาเลย อาจจะมีปัญหาการเชื่อมต่อ")
+        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี หรือโหลดข้อมูลไม่สำเร็จ")
         return
         
     old_data = {}
@@ -108,17 +98,27 @@ def main():
     changed_stations = []
     
     for station, details in current_data.items():
+        # ถ้าเป็นปั๊มใหม่ที่ไม่เคยมี หรือ ข้อมูลเปลี่ยน
         if station not in old_data or current_data[station] != old_data[station]:
+            
             diesel_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
             g95_icon = "❌" if "หมด" in details['G95'] else "✅"
             
             msg = f"📍 {station}\n"
             msg += f"ดีเซล: {diesel_icon} {details['ดีเซล']} | G95: {g95_icon} {details['G95']}\n"
-            msg += f"รถขนส่ง: 🚚 {details['รถขนส่ง']}"
+            
+            transport_status = details['รถขนส่ง']
+            if not transport_status or transport_status == "ปกติ" or transport_status == "null":
+                msg += "รถขนส่ง: ✅ ปกติ"
+            else:
+                 msg += f"รถขนส่ง: 🚚 {transport_status}"
+                 
             changed_stations.append(msg)
             
     if changed_stations:
         print(f"พบปั๊มในอินทร์บุรีที่สถานะเปลี่ยน {len(changed_stations)} แห่ง! กำลังส่งเข้า LINE...")
+        
+        # ถ้ายาวเกินไป LINE จะส่งไม่ผ่าน ให้หั่นส่งทีละนิดถ้าจำเป็น (แต่ 15 ปั๊มน่าจะผ่านสบายๆ)
         final_msg = "🔔 อัปเดตสถานะน้ำมัน อินทร์บุรี!\n\n" + "\n\n".join(changed_stations)
         send_message(final_msg)
         
