@@ -25,10 +25,12 @@ def send_message(text):
         "to": LINE_TO_ID,
         "messages": [{"type": "text", "text": text}]
     }
-    requests.post(url, headers=headers, json=payload)
+    response = requests.post(url, headers=headers, json=payload)
+    if response.status_code != 200:
+        print(f"❌ แจ้งเตือน LINE ไม่สำเร็จ: {response.text}")
 
 def get_fuel_data():
-    print("กำลังเริ่มระบบเจาะข้อมูล 2 ชั้น...")
+    print("กำลังเริ่มระบบเจาะข้อมูลระดับลึกพร้อมแผนที่...")
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
@@ -42,16 +44,16 @@ def get_fuel_data():
     
     try:
         driver.get(DATA_URL)
-        # มุดเข้าห้องลับ 2 ชั้นตามแผนเดิมที่เริ่มทำงานได้แล้ว
-        iframe1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
+        # มุดเข้าห้องลับ 2 ชั้นตามแผนเดิมที่เสถียรแล้ว
+        iframe1 = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
         driver.switch_to.frame(iframe1)
         
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
         
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
-        time.sleep(3)
+        WebDriverWait(driver, 35).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
+        time.sleep(5) # เผื่อเวลาให้ตารางขึ้นครบตามรูป debug ของพี่
         
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
@@ -61,19 +63,26 @@ def get_fuel_data():
             rows = tbody.find_all('tr')
             for tr in rows:
                 tds = tr.find_all('td')
-                if len(tds) >= 9:
+                if len(tds) >= 10: # ตรวจสอบคอลัมน์แผนที่
                     name = tds[0].text.strip()
                     district = tds[8].text.strip()
                     
                     if "อินทร์บุรี" in district:
+                        # 🌟 ไม้ตาย: สั่งให้บอทแกะลิงก์ Google Maps จากปุ่มแผนที่ในคอลัมน์สุดท้าย
+                        map_cell = tds[-1] # คอลัมน์ "แผนที่" สุดท้าย
+                        map_a_tag = map_cell.find('a', href=True) # หา tag 'a' ที่มีhref
+                        map_url = ""
+                        if map_a_tag:
+                            map_url = map_a_tag['href'] # ดึงลิงก์ Google Maps ออกมาตรงๆ ตามรูป `image_fd63ab.png`
+                            print(f"✅ แกะลิงก์แผนที่สำเร็จ: {name}")
+
+                        # เก็บข้อมูล (รวมเวลาอัปเดตและแผนที่)
                         stations[name] = {
                             "ดีเซล": tds[1].text.strip(),
                             "G95": tds[2].text.strip(),
-                            "G91": tds[3].text.strip(),
-                            "E20": tds[4].text.strip(),
-                            "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
-                            "อัปเดตล่าสุด": tds[6].text.strip(), # ดึงเวลาอัปเดตล่าสุดจากหน้าเว็บ
-                            "อำเภอ": district
+                            "อัปเดตล่าสุด": tds[6].text.strip(),
+                            "อำเภอ": district,
+                            "แผนที่": map_url # เก็บลิงก์แผนที่ไว้ในข้อมูลชุดนี้
                         }
     except Exception as e:
         print(f"⚠️ Error: {e}")
@@ -94,15 +103,20 @@ def main():
             
     changed_stations = []
     for station, details in current_data.items():
-        # ตรวจสอบว่าข้อมูลมีการเปลี่ยนแปลงหรือไม่ (รวมถึงเวลาอัปเดตล่าสุด)
+        # ตรวจสอบว่าข้อมูลมีการเปลี่ยนแปลงหรือไม่ (รวมถึงเวลาอัปเดต)
         if station not in old_data or current_data[station] != old_data[station]:
             d_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
             g_icon = "❌" if "หมด" in details['G95'] else "✅"
             
+            # จัดรูปแบบข้อความแจ้งเตือน (รวมเวลาอัปเดตและ Google Maps)
             msg = f"📍 {station}\n"
             msg += f"ดีเซล: {d_icon} {details['ดีเซล']} | G95: {g_icon} {details['G95']}\n"
-            msg += f"🚚 {details['รถขนส่ง']}\n"
-            msg += f"🕒 อัปเดตเมื่อ: {details['อัปเดตล่าสุด']}" # แสดงเวลาจากหน้าเว็บใน LINE
+            msg += f"🕒 อัปเดตเมื่อ: {details['อัปเดตล่าสุด']}" # แสดงเวลาจากหน้าเว็บ
+            
+            # เพิ่มลิงก์แผนที่นำทางต่อท้ายปั๊ม ถ้าแกะสำเร็จ
+            if details.get('แผนที่'):
+                msg += f"\n🗺️ แผนที่นำทาง: {details['แผนที่']}" # แสดงลิงก์ Google Maps ใน LINE
+                
             changed_stations.append(msg)
             
     if changed_stations:
