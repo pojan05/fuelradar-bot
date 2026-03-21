@@ -1,7 +1,8 @@
 name: Auto Run Bot
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    # รันทุก 10 นาที (*/10) เพื่อความรวดเร็วและรักษาโควตาให้รันได้ตลอดเดือน
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +33,6 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           touch data.json
-          git add data.json *.png
-          git commit -m "update data and debug screens" || echo "No changes"
+          git add data.json
+          git commit -m "update data" || echo "No changes"
           git push
