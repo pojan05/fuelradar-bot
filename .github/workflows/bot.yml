@@ -24,13 +24,12 @@ jobs:
           
       - name: Install Python Packages
         run: |
-          pip install requests beautifulsoup4 undetected-chromedriver selenium
+          pip install requests beautifulsoup4 undetected-chromedriver selenium webdriver-manager
         
       - name: Run Python Code
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_TO_ID: ${{ secrets.LINE_TO_ID }}
-        # รันโค้ดผ่านหน้าจอจำลอง (xvfb) ข้ามการตรวจจับ
         run: xvfb-run -a python main.py
         
       - name: Save Data
