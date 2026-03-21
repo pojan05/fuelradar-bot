@@ -1,0 +1,35 @@
+name: Auto Run Bot
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # สั่งให้ทำงานทุกๆ 5 นาที
+  workflow_dispatch:       # ทำให้เรากดปุ่มรันเองได้ด้วย
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install Tools
+        run: pip install requests
+        
+      - name: Run Python Code
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          LINE_TO_ID: ${{ secrets.LINE_TO_ID }}
+        run: python main.py
+        
+      - name: Save Data
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add data.txt
+          git commit -m "update data" || echo "No changes"
+          git push
