@@ -21,15 +21,14 @@ def send_message(text):
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {LINE_TOKEN}'
     }
-    # หั่นข้อความส่งทีละไม่เกิน 5,000 ตัวอักษร
     payload = {
         "to": LINE_TO_ID,
-        "messages": [{"type": "text", "text": text[:5000]}]
+        "messages": [{"type": "text", "text": text}]
     }
     requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("กำลังเริ่มระบบเจาะข้อมูลระดับลึกพร้อมแผนที่...")
+    print("กำลังเริ่มระบบเจาะข้อมูล 2 ชั้น...")
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
@@ -43,15 +42,16 @@ def get_fuel_data():
     
     try:
         driver.get(DATA_URL)
-        iframe1 = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
+        # มุดเข้าห้องลับ 2 ชั้นตามแผนเดิมที่เริ่มทำงานได้แล้ว
+        iframe1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
         driver.switch_to.frame(iframe1)
         
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
         
-        WebDriverWait(driver, 35).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
-        time.sleep(5)
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
+        time.sleep(3)
         
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
@@ -61,24 +61,20 @@ def get_fuel_data():
             rows = tbody.find_all('tr')
             for tr in rows:
                 tds = tr.find_all('td')
-                if len(tds) >= 10:
+                if len(tds) >= 9:
                     name = tds[0].text.strip()
                     district = tds[8].text.strip()
                     
                     if "อินทร์บุรี" in district:
-                        map_url = ""
-                        map_a = tds[-1].find('a', href=True)
-                        if map_a:
-                            map_url = map_a['href']
-                        
                         stations[name] = {
                             "ดีเซล": tds[1].text.strip(),
                             "G95": tds[2].text.strip(),
-                            "อัปเดตล่าสุด": tds[6].text.strip(),
-                            "อำเภอ": district,
-                            "แผนที่": map_url
+                            "G91": tds[3].text.strip(),
+                            "E20": tds[4].text.strip(),
+                            "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
+                            "อัปเดตล่าสุด": tds[6].text.strip(), # ดึงเวลาอัปเดตล่าสุดจากหน้าเว็บ
+                            "อำเภอ": district
                         }
-                        print(f"✅ แกะข้อมูลสำเร็จ: {name}")
     except Exception as e:
         print(f"⚠️ Error: {e}")
     finally:
@@ -96,29 +92,27 @@ def main():
             try: old_data = json.load(f)
             except: old_data = {}
             
-    updates = []
-    for station, d in current_data.items():
+    changed_stations = []
+    for station, details in current_data.items():
+        # ตรวจสอบว่าข้อมูลมีการเปลี่ยนแปลงหรือไม่ (รวมถึงเวลาอัปเดตล่าสุด)
         if station not in old_data or current_data[station] != old_data[station]:
-            d_icon = "❌" if "หมด" in d['ดีเซล'] else "✅"
-            g_icon = "❌" if "หมด" in d['G95'] else "✅"
+            d_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
+            g_icon = "❌" if "หมด" in details['G95'] else "✅"
             
-            msg = f"📍 {station}\nดีเซล: {d_icon} {d['ดีเซล']} | G95: {g_icon} {d['G95']}\n🕒 อัปเดตเมื่อ: {d['อัปเดตล่าสุด']}"
-            if d['แผนที่']:
-                msg += f"\n🗺️ แผนที่: {d['แผนที่']}"
-            updates.append(msg)
+            msg = f"📍 {station}\n"
+            msg += f"ดีเซล: {d_icon} {details['ดีเซล']} | G95: {g_icon} {details['G95']}\n"
+            msg += f"🚚 {details['รถขนส่ง']}\n"
+            msg += f"🕒 อัปเดตเมื่อ: {details['อัปเดตล่าสุด']}" # แสดงเวลาจากหน้าเว็บใน LINE
+            changed_stations.append(msg)
             
-    if updates:
-        # หั่นส่งครั้งละ 5 ปั๊มเพื่อป้องกันข้อความยาวเกิน limit
-        for i in range(0, len(updates), 5):
-            chunk = updates[i:i+5]
-            final_msg = "🔔 อัปเดตใหม่! สถานะน้ำมันอินทร์บุรี\n\n" + "\n\n".join(chunk)
-            send_message(final_msg)
-            time.sleep(2) # กัน LINE แบน
-            
+    if changed_stations:
+        print(f"พบข้อมูลเปลี่ยนแปลง {len(changed_stations)} แห่ง")
+        final_msg = "🔔 อัปเดตใหม่! สถานะน้ำมันอินทร์บุรี\n\n" + "\n\n".join(changed_stations)
+        send_message(final_msg)
         with open("data.json", "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=False, indent=2)
     else:
-        print("✅ ข้อมูลยังเป็นปัจจุบัน")
+        print("✅ ข้อมูลยังเป็นปัจจุบัน ไม่มีการเปลี่ยนแปลง")
 
 if __name__ == "__main__":
     main()
