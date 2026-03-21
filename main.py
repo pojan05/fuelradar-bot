@@ -42,33 +42,23 @@ def get_fuel_data():
     
     try:
         driver.get(DATA_URL)
-        print("1. มุดเข้า iframe ชั้นแรก (sandboxFrame)...")
-        iframe1 = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.ID, "sandboxFrame"))
-        )
+        # มุดเข้าห้องลับ 2 ชั้นตามแผนเดิมที่เริ่มทำงานได้แล้ว
+        iframe1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
         driver.switch_to.frame(iframe1)
         
-        print("2. มุดเข้า iframe ชั้นที่สอง (ห้องลับของ Google)...")
-        # รอให้ iframe ตัวที่สองโผล่มา แล้วมุดเข้าไป
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
         
-        print("3. คอยตารางข้อมูลปรากฏบนหน้าจอ...")
-        # รอจนกว่าตารางจะขึ้นจริงๆ (เหมือนในรูป debug ของพี่)
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.ID, "tbody-dash"))
-        )
-        time.sleep(3) # เผื่อเวลาให้ตัวหนังสือโหลดครบ
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
+        time.sleep(3)
         
-        # กวาดข้อมูลออกมา
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         tbody = soup.find('tbody', id='tbody-dash')
         
         if tbody:
             rows = tbody.find_all('tr')
-            print(f"✅ สำเร็จ! พบข้อมูลทั้งหมด {len(rows)} ปั๊ม")
             for tr in rows:
                 tds = tr.find_all('td')
                 if len(tds) >= 9:
@@ -82,17 +72,13 @@ def get_fuel_data():
                             "G91": tds[3].text.strip(),
                             "E20": tds[4].text.strip(),
                             "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
+                            "อัปเดตล่าสุด": tds[6].text.strip(), # ดึงเวลาอัปเดตล่าสุดจากหน้าเว็บ
                             "อำเภอ": district
                         }
-        else:
-            print("❌ ยังหาตารางไม่เจอแม้จะมุดเข้ามาแล้ว")
-
     except Exception as e:
-        print(f"⚠️ เกิดข้อผิดพลาด: {e}")
-        driver.save_screenshot("error_at_the_end.png")
+        print(f"⚠️ Error: {e}")
     finally:
         driver.quit()
-        
     return stations
 
 def main():
@@ -100,8 +86,6 @@ def main():
     if not current_data:
         return
         
-    print(f"พบปั๊มในอินทร์บุรี {len(current_data)} แห่ง")
-    
     old_data = {}
     if os.path.exists("data.json"):
         with open("data.json", "r", encoding="utf-8") as f:
@@ -110,20 +94,25 @@ def main():
             
     changed_stations = []
     for station, details in current_data.items():
+        # ตรวจสอบว่าข้อมูลมีการเปลี่ยนแปลงหรือไม่ (รวมถึงเวลาอัปเดตล่าสุด)
         if station not in old_data or current_data[station] != old_data[station]:
             d_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
             g_icon = "❌" if "หมด" in details['G95'] else "✅"
-            msg = f"📍 {station}\nดีเซล: {d_icon} {details['ดีเซล']} | G95: {g_icon} {details['G95']}\n🚚 {details['รถขนส่ง']}"
+            
+            msg = f"📍 {station}\n"
+            msg += f"ดีเซล: {d_icon} {details['ดีเซล']} | G95: {g_icon} {details['G95']}\n"
+            msg += f"🚚 {details['รถขนส่ง']}\n"
+            msg += f"🕒 อัปเดตเมื่อ: {details['อัปเดตล่าสุด']}" # แสดงเวลาจากหน้าเว็บใน LINE
             changed_stations.append(msg)
             
     if changed_stations:
-        print("กำลังส่งแจ้งเตือนเข้า LINE...")
-        final_msg = "🔔 อัปเดตสถานะน้ำมัน อินทร์บุรี!\n\n" + "\n\n".join(changed_stations)
+        print(f"พบข้อมูลเปลี่ยนแปลง {len(changed_stations)} แห่ง")
+        final_msg = "🔔 อัปเดตใหม่! สถานะน้ำมันอินทร์บุรี\n\n" + "\n\n".join(changed_stations)
         send_message(final_msg)
         with open("data.json", "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=False, indent=2)
     else:
-        print("✅ ข้อมูลยังเหมือนเดิม")
+        print("✅ ข้อมูลยังเป็นปัจจุบัน ไม่มีการเปลี่ยนแปลง")
 
 if __name__ == "__main__":
     main()
