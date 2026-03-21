@@ -8,8 +8,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
@@ -28,7 +26,7 @@ def send_message(text):
     requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("กำลังเปิดเบราว์เซอร์ (โหมดติดกล้องวงจรปิด)...")
+    print("กำลังเปิดเบราว์เซอร์...")
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
@@ -36,55 +34,41 @@ def get_fuel_data():
     options.add_argument('--window-size=1920,1080')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
     
-    # ปลดล็อคคุกกี้
-    prefs = {"profile.cookie_controls_mode": 0}
-    options.add_experimental_option("prefs", prefs)
-
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     stations = {}
     
     try:
         driver.get(DATA_URL)
-        print("กำลังรอและมุดเข้า iframe...")
-        time.sleep(5)
+        # จากรูปวงจรปิด เราเห็นว่า 5-10 วิ ข้อมูลก็มาแล้ว เราจะให้มันรอชัวร์ๆ 15 วิ
+        print("รอให้หน้าเว็บโหลดข้อมูลให้เสร็จสมบูรณ์ (15 วินาที)...")
+        time.sleep(15) 
         
-        # 📸 ถ่ายรูปสเต็ปแรก (หน้าเว็บหลักตอนเพิ่งโหลด)
-        driver.save_screenshot("debug_1_main_page.png")
+        print("กำลังค้นหาตารางข้อมูลจากทุกกล่อง (iframe) บนหน้าจอ...")
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        print(f"พบ iframe บนหน้าเว็บทั้งหมด {len(iframes)} กล่อง")
         
-        try:
-            iframe = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.ID, "sandboxFrame"))
-            )
-        except:
-            iframe = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-            )
+        found_table = False
+        
+        # ค้นหาทุกกล่อง กล่องไหนมีตารางให้หยุดที่กล่องนั้น
+        for index, iframe in enumerate(iframes):
+            driver.switch_to.default_content() # กลับมาตั้งหลักที่หน้าแรก
+            driver.switch_to.frame(iframe)     # มุดเข้ากล่อง
             
-        driver.switch_to.frame(iframe)
-        print("มุดเข้า iframe สำเร็จ! กำลังรอตารางน้ำมันโหลด (รอ 45 วิ)...")
+            elements = driver.find_elements(By.ID, "tbody-dash")
+            if len(elements) > 0:
+                print(f"✅ โป๊ะเชะ! เจอเป้าหมายในกล่องที่ {index + 1}")
+                found_table = True
+                break
+                
+        if not found_table:
+            print("❌ หาตารางไม่เจอในทุกกล่องเลย")
+            return stations
 
-        try:
-            WebDriverWait(driver, 45).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "#tbody-dash tr"))
-            )
-            # 📸 ถ่ายรูปตอนสำเร็จ (ตารางโผล่)
-            driver.save_screenshot("debug_2_success.png")
-            
-        except Exception as e:
-            print("⚠️ ตารางไม่โหลด! กำลังถ่ายรูปเก็บไว้เป็นหลักฐาน...")
-            # 📸 ถ่ายรูปหลักฐานชิ้นสำคัญตอนที่มัน Error!
-            driver.save_screenshot("debug_error.png")
-            raise e
-        
-        time.sleep(3)
+        # พออยู่ในกล่องที่ถูกต้อง ก็ดึงข้อมูลเลย!
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         tbody = soup.find('tbody', id='tbody-dash')
-        
-        if not tbody:
-            print("❌ ไม่พบตารางข้อมูลใน iframe")
-            return stations
 
         rows = tbody.find_all('tr')
         print(f"ดึงข้อมูลสำเร็จ พบทั้งหมด {len(rows)} ปั๊มบนหน้าเว็บ")
@@ -100,6 +84,7 @@ def get_fuel_data():
                 transport = tds[5].text.strip().replace('\n', ' ')
                 district = tds[8].text.strip()
                 
+                # กรองเฉพาะอินทร์บุรี
                 if "อินทร์บุรี" in district:
                     stations[name] = {
                         "ดีเซล": diesel,
@@ -121,7 +106,7 @@ def get_fuel_data():
 def main():
     current_data = get_fuel_data()
     if not current_data:
-        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี (ตรวจสอบรูป debug_error.png ในหน้า Code ของ GitHub ได้เลยครับ)")
+        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี")
         return
         
     old_data = {}
