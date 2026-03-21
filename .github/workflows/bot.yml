@@ -10,8 +10,6 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     steps:
       - uses: actions/checkout@v4
       
@@ -19,15 +17,21 @@ jobs:
         with:
           python-version: '3.10'
           
-      - name: Install Tools
+      - name: Install System Tools (สร้างหน้าจอจำลอง)
         run: |
-          pip install requests beautifulsoup4 selenium webdriver-manager
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          
+      - name: Install Python Packages
+        run: |
+          pip install requests beautifulsoup4 undetected-chromedriver selenium
         
       - name: Run Python Code
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_TO_ID: ${{ secrets.LINE_TO_ID }}
-        run: python main.py
+        # รันโค้ดผ่านหน้าจอจำลอง (xvfb) ข้ามการตรวจจับ
+        run: xvfb-run -a python main.py
         
       - name: Save Data
         run: |
