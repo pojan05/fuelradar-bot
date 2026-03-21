@@ -7,6 +7,7 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
@@ -25,14 +26,17 @@ def send_message(text):
     requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("กำลังเปิดเบราว์เซอร์ (โหมดเหมือนคนเล่นจริงๆ ข้ามการตรวจจับ)...")
+    print("กำลังเปิดเบราว์เซอร์ (โหมดทะลวงบอท + ปรับเวอร์ชันอัตโนมัติ)...")
     options = uc.ChromeOptions()
-    # ไม่ต้องใช้ Headless แล้ว เพราะเรามีหน้าจอจำลองจาก GitHub
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     
-    driver = uc.Chrome(options=options)
+    # 🌟 พระเอกขี่ม้าขาว: ดาวน์โหลด Driver ให้ตรงกับเวอร์ชันของ Chrome บน GitHub เป๊ะๆ
+    driver_path = ChromeDriverManager().install()
+    
+    # 🌟 ส่ง Driver ที่ถูกต้องเป๊ะๆ ให้ระบบเจาะเกราะทำงาน
+    driver = uc.Chrome(options=options, driver_executable_path=driver_path)
     stations = {}
     
     try:
@@ -82,7 +86,7 @@ def get_fuel_data():
                 transport = tds[5].text.strip().replace('\n', ' ')
                 district = tds[8].text.strip()
                 
-                # 🌟 จุดนี้คือที่บอททำหน้าที่คัดกรองเอาเฉพาะ "อินทร์บุรี"
+                # กรองเอาเฉพาะ "อินทร์บุรี"
                 if "อินทร์บุรี" in district:
                     stations[name] = {
                         "ดีเซล": diesel,
