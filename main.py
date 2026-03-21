@@ -3,11 +3,13 @@ import json
 import time
 import requests
 from bs4 import BeautifulSoup
-import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
@@ -26,41 +28,53 @@ def send_message(text):
     requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("กำลังเปิดเบราว์เซอร์ (โหมดทะลวงบอท + ปรับเวอร์ชันอัตโนมัติ)...")
-    options = uc.ChromeOptions()
+    print("กำลังเปิดเบราว์เซอร์ (โหมดติดกล้องวงจรปิด)...")
+    options = Options()
+    options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
     
-    # 🌟 พระเอกขี่ม้าขาว: ดาวน์โหลด Driver ให้ตรงกับเวอร์ชันของ Chrome บน GitHub เป๊ะๆ
-    driver_path = ChromeDriverManager().install()
-    
-    # 🌟 ส่ง Driver ที่ถูกต้องเป๊ะๆ ให้ระบบเจาะเกราะทำงาน
-    driver = uc.Chrome(options=options, driver_executable_path=driver_path)
+    # ปลดล็อคคุกกี้
+    prefs = {"profile.cookie_controls_mode": 0}
+    options.add_experimental_option("prefs", prefs)
+
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     stations = {}
     
     try:
         driver.get(DATA_URL)
         print("กำลังรอและมุดเข้า iframe...")
+        time.sleep(5)
+        
+        # 📸 ถ่ายรูปสเต็ปแรก (หน้าเว็บหลักตอนเพิ่งโหลด)
+        driver.save_screenshot("debug_1_main_page.png")
         
         try:
-            iframe = WebDriverWait(driver, 20).until(
+            iframe = WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.ID, "sandboxFrame"))
             )
         except:
-            iframe = WebDriverWait(driver, 20).until(
+            iframe = WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.TAG_NAME, "iframe"))
             )
             
         driver.switch_to.frame(iframe)
-        print("มุดเข้า iframe สำเร็จ! กำลังรอตารางน้ำมันโหลด (รอสูงสุด 45 วินาที)...")
+        print("มุดเข้า iframe สำเร็จ! กำลังรอตารางน้ำมันโหลด (รอ 45 วิ)...")
 
         try:
             WebDriverWait(driver, 45).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "#tbody-dash tr"))
             )
+            # 📸 ถ่ายรูปตอนสำเร็จ (ตารางโผล่)
+            driver.save_screenshot("debug_2_success.png")
+            
         except Exception as e:
-            print("⚠️ ตารางไม่โหลด! Google อาจจะยังบล็อกอยู่")
+            print("⚠️ ตารางไม่โหลด! กำลังถ่ายรูปเก็บไว้เป็นหลักฐาน...")
+            # 📸 ถ่ายรูปหลักฐานชิ้นสำคัญตอนที่มัน Error!
+            driver.save_screenshot("debug_error.png")
             raise e
         
         time.sleep(3)
@@ -86,7 +100,6 @@ def get_fuel_data():
                 transport = tds[5].text.strip().replace('\n', ' ')
                 district = tds[8].text.strip()
                 
-                # กรองเอาเฉพาะ "อินทร์บุรี"
                 if "อินทร์บุรี" in district:
                     stations[name] = {
                         "ดีเซล": diesel,
@@ -96,7 +109,6 @@ def get_fuel_data():
                         "รถขนส่ง": transport,
                         "อำเภอ": district
                     }
-        print(f"✅ คัดกรองเหลือเฉพาะปั๊มในอินทร์บุรีได้ {len(stations)} แห่ง")
 
     except Exception as e:
         print(f"⚠️ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
@@ -109,7 +121,7 @@ def get_fuel_data():
 def main():
     current_data = get_fuel_data()
     if not current_data:
-        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี หรือโหลดข้อมูลไม่สำเร็จ")
+        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี (ตรวจสอบรูป debug_error.png ในหน้า Code ของ GitHub ได้เลยครับ)")
         return
         
     old_data = {}
