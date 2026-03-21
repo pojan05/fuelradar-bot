@@ -1,7 +1,7 @@
 name: Auto Run Bot
 on:
   schedule:
-    # รันทุก 10 นาที (*/10) เพื่อความรวดเร็วและรักษาโควตาให้รันได้ตลอดเดือน
+    # รันทุก 10 นาที เพื่อความรวดเร็วในการจับข้อมูลใหม่
     - cron: '*/10 * * * *'
   workflow_dispatch:
 
@@ -20,7 +20,8 @@ jobs:
           
       - name: Install Tools
         run: |
-          pip install requests beautifulsoup4 selenium webdriver-manager
+          # ติดตั้งเครื่องมือพื้นฐานและ pytz สำหรับจัดการเวลาไทย
+          pip install requests beautifulsoup4 selenium webdriver-manager pytz
         
       - name: Run Python Code
         env:
