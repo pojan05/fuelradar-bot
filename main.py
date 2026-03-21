@@ -13,116 +13,85 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ตั้งค่า Configuration
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
 DATA_URL = "https://script.google.com/macros/s/AKfycbxflVoeKNYwHDhMFqoZkeKUR0AG5GI4jwfqefySHxXa6MnDdBn7NbTkT4NjN-WbgYQrMQ/exec"
 
-def create_flex_bubble(station_name, d):
-    # ฟังก์ชันช่วยเลือกสีตามสถานะน้ำมัน
-    def get_color(status):
-        return "#22bb33" if "มี" in status else "#bb2124" if "หมด" in status else "#aaaaaa"
+def create_station_row(name, d):
+    # สร้างแถวข้อมูลปั๊มแบบประหยัดพื้นที่
+    def get_dot(status):
+        return "🟢" if "มี" in status else "🔴" if "หมด" in status else "⚪"
     
     return {
-      "type": "bubble",
-      "size": "mega",
-      "header": {
-        "type": "box", "layout": "vertical", "backgroundColor": "#f39c12",
-        "contents": [{"type": "text", "text": station_name, "weight": "bold", "color": "#ffffff", "size": "lg"}]
-      },
-      "body": {
-        "type": "box", "layout": "vertical", "spacing": "md",
+        "type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm",
         "contents": [
-          {"type": "box", "layout": "horizontal", "contents": [
-            {"type": "text", "text": "ดีเซล", "flex": 1, "size": "sm", "color": "#555555"},
-            {"type": "text", "text": d['ดีเซล'], "flex": 2, "size": "sm", "weight": "bold", "color": get_color(d['ดีเซล']), "align": "end"}
-          ]},
-          {"type": "box", "layout": "horizontal", "contents": [
-            {"type": "text", "text": "G95/G91", "flex": 1, "size": "sm", "color": "#555555"},
-            {"type": "text", "text": f"{d['G95']} | {d['G91']}", "flex": 2, "size": "sm", "weight": "bold", "color": "#333333", "align": "end"}
-          ]},
-          {"type": "box", "layout": "horizontal", "contents": [
-            {"type": "text", "text": "E20", "flex": 1, "size": "sm", "color": "#555555"},
-            {"type": "text", "text": d['E20'], "flex": 2, "size": "sm", "weight": "bold", "color": get_color(d['E20']), "align": "end"}
-          ]},
-          {"type": "separator", "margin": "md"},
-          {"type": "text", "text": f"🚚 รถ: {d['รถขนส่ง']}", "size": "xs", "color": "#888888", "wrap": True},
-          {"type": "text", "text": f"🕒 อัปเดตล่าสุด: {d['อัปเดตล่าสุด']}", "size": "xs", "color": "#888888"}
+            {"type": "box", "layout": "horizontal", "contents": [
+                {"type": "text", "text": f"📍 {name}", "weight": "bold", "size": "sm", "flex": 4, "color": "#111111", "wrap": True},
+                {"type": "button", "action": {"type": "uri", "label": "แผนที่", "uri": d['map_url']}, "flex": 2, "height": "xs", "style": "secondary", "color": "#eeeeee"}
+            ]},
+            {"type": "box", "layout": "horizontal", "contents": [
+                {"type": "text", "text": f"D:{get_dot(d['ดีเซล'])} | 95:{get_dot(d['G95'])} | 91:{get_dot(d['G91'])} | E20:{get_dot(d['E20'])}", "size": "xs", "color": "#555555", "flex": 4},
+                {"type": "text", "text": d['อัปเดตล่าสุด'], "size": "xxs", "color": "#aaaaaa", "align": "end", "flex": 2}
+            ]},
+            {"type": "text", "text": f"🚚 {d['รถขนส่ง']}", "size": "xxs", "color": "#999999"},
+            {"type": "separator", "margin": "md"}
         ]
-      },
-      "footer": {
-        "type": "box", "layout": "vertical",
-        "contents": [{"type": "button", "action": {"type": "uri", "label": "🌐 เปิดแผนที่ (Google Maps)", "uri": d['map_url']}, "style": "primary", "color": "#3498db", "height": "sm"}]
-      }
     }
 
-def send_flex(bubbles, alt_text="อัปเดตน้ำมันอินทร์บุรี"):
+def create_list_bubble(title, station_chunk):
+    # สร้าง Bubble ขนาดใหญ่ที่บรรจุปั๊มได้หลายแห่ง
+    rows = [create_station_row(name, data) for name, data in station_chunk.items()]
+    return {
+        "type": "bubble",
+        "header": {"type": "box", "layout": "vertical", "backgroundColor": "#f39c12", "contents": [{"type": "text", "text": title, "color": "#ffffff", "weight": "bold", "size": "md"}]},
+        "body": {"type": "box", "layout": "vertical", "contents": rows}
+    }
+
+def send_flex(bubbles, alt_text):
     url = 'https://api.line.me/v2/bot/message/push'
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_TOKEN}'}
-    # หั่นส่งครั้งละไม่เกิน 10 bubbles ตามเกณฑ์ LINE
-    for i in range(0, len(bubbles), 10):
-        chunk = bubbles[i:i+10]
-        payload = {
-            "to": LINE_TO_ID,
-            "messages": [{
-                "type": "flex",
-                "altText": alt_text,
-                "contents": {"type": "carousel", "contents": chunk}
-            }]
-        }
-        requests.post(url, headers=headers, json=payload)
+    # ส่ง 1 Push Message บรรจุได้สูงสุด 12 Bubbles (เราส่งแค่ 1-2 แผ่นก็ครบ 16 ปั๊มแล้ว)
+    payload = {
+        "to": LINE_TO_ID,
+        "messages": [{
+            "type": "flex",
+            "altText": alt_text,
+            "contents": {"type": "carousel", "contents": bubbles[:12]}
+        }]
+    }
+    requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("🚀 กำลังดึงข้อมูลแม่นยำสูง (Hybrid Extraction)...")
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
-    
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     stations = {}
-    
     try:
         driver.get(DATA_URL)
-        # มุด 2 ชั้นเข้าสู่ตารางข้อมูล
         iframe1 = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
         driver.switch_to.frame(iframe1)
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
-        
         WebDriverWait(driver, 35).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
-        time.sleep(5) 
-        
+        time.sleep(5)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         tbody = soup.find('tbody', id='tbody-dash')
-        
         if tbody:
             for tr in tbody.find_all('tr'):
                 tds = tr.find_all('td')
-                if len(tds) >= 10:
+                if len(tds) >= 10 and "อินทร์บุรี" in tds[8].text:
                     name = tds[0].text.strip()
-                    district = tds[8].text.strip()
-                    
-                    if "อินทร์บุรี" in district:
-                        # ดึงลิงก์แผนที่จริงจากปุ่มสีฟ้า
-                        map_link = tds[9].find('a')['href'] if tds[9].find('a') else "https://www.google.com/maps"
-                        
-                        stations[name] = {
-                            "ดีเซล": tds[1].text.strip(),
-                            "G95": tds[2].text.strip(),
-                            "G91": tds[3].text.strip(),
-                            "E20": tds[4].text.strip(),
-                            "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
-                            "อัปเดตล่าสุด": tds[6].text.strip(),
-                            "map_url": map_link
-                        }
-                        print(f"✅ อ่านสำเร็จ: {name}")
-    except Exception as e:
-        print(f"⚠️ Error: {e}")
-    finally:
-        driver.quit()
+                    stations[name] = {
+                        "ดีเซล": tds[1].text.strip(), "G95": tds[2].text.strip(),
+                        "G91": tds[3].text.strip(), "E20": tds[4].text.strip(),
+                        "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
+                        "อัปเดตล่าสุด": tds[6].text.strip(),
+                        "map_url": tds[9].find('a')['href'] if tds[9].find('a') else "https://www.google.com/maps"
+                    }
+    finally: driver.quit()
     return stations
 
 def main():
@@ -132,25 +101,26 @@ def main():
     tz = pytz.timezone('Asia/Bangkok')
     now = datetime.datetime.now(tz)
     
-    # 🕒 1. รายงานสรุปตอน 06.00 น.
+    # 🕒 1. สรุปเช้า 06.00 น. (รวมเป็นแผ่นเดียวจบ)
     if now.hour == 6 and now.minute < 11:
-        bubbles = [create_flex_bubble(s, d) for s, d in current_data.items()]
-        send_flex(bubbles, "🌅 สรุปภาพรวมน้ำมันเช้านี้ (อินทร์บุรี)")
+        items = list(current_data.items())
+        # แบ่งเป็น 2 แผ่น แผ่นละ 8-9 ปั๊ม เพื่อความสวยงามไม่ยาวเกินไป
+        bubble1 = create_list_bubble("🌅 สรุปน้ำมันเช้านี้ (1/2)", dict(items[:8]))
+        bubble2 = create_list_bubble("🌅 สรุปน้ำมันเช้านี้ (2/2)", dict(items[8:]))
+        send_flex([bubble1, bubble2], "สรุปน้ำมันยามเช้าอินทร์บุรี")
 
-    # 🔔 2. แจ้งเตือนทันทีเมื่อมีการเปลี่ยนแปลง
+    # 🔔 2. แจ้งเตือนเมื่อเปลี่ยน (รวมรายการที่เปลี่ยนไว้ในแผ่นเดียว)
     old_data = {}
     if os.path.exists("data.json"):
         with open("data.json", "r", encoding="utf-8") as f:
             try: old_data = json.load(f)
             except: pass
             
-    update_bubbles = []
-    for station, d in current_data.items():
-        if station not in old_data or current_data[station] != old_data[station]:
-            update_bubbles.append(create_flex_bubble(station, d))
+    changes = {s: d for s, d in current_data.items() if s not in old_data or d != old_data[s]}
             
-    if update_bubbles:
-        send_flex(update_bubbles, "🔔 มีอัปเดตน้ำมันใหม่ในอินทร์บุรี!")
+    if changes:
+        bubble = create_list_bubble("🔔 พบการอัปเดตน้ำมัน!", changes)
+        send_flex([bubble], "มีอัปเดตน้ำมันใหม่!")
         with open("data.json", "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=False, indent=2)
 
