@@ -2,10 +2,9 @@ import os
 import json
 import time
 import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -24,83 +23,83 @@ def send_message(text):
         "to": LINE_TO_ID,
         "messages": [{"type": "text", "text": text}]
     }
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code != 200:
-        print(f"❌ แจ้งเตือน LINE ไม่สำเร็จ: {response.text}")
+    requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("กำลังเปิดเบราว์เซอร์จำลองเพื่อดึงข้อมูล...")
+    print("กำลังเปิดเบราว์เซอร์จำลอง...")
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    # ขยายหน้าต่างบอทให้กว้างสุด เพื่อป้องกันเว็บซ่อนคอลัมน์ "อำเภอ" ในโหมดมือถือ
+    options.add_argument('--window-size=1920,1080') 
     
-    # When running in environments like GitHub Actions the chromedriver binary may
-    # not already be installed on the runner.  Using webdriver‑manager to fetch
-    # a matching chromedriver avoids version mismatch issues.  If the environment
-    # already provides a bundled driver (e.g. in a Docker container) this will
-    # simply return the existing binary.
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(options=options)
     stations = {}
     
     try:
         driver.get(DATA_URL)
+        print("กำลังรอโหลดหน้าเว็บหลัก...")
         
-        print("กำลังรอและมุดเข้า iframe...")
-        # Some versions of the FuelRadar web app change the id of the sandbox
-        # iframe over time.  Try to locate it by id first; if not found fall
-        # back to the first iframe on the page.  Then switch into that frame
-        # before executing any scripts.  A generous wait helps with slow
-        # network connections.
-        try:
-            iframe = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.ID, "sandboxFrame"))
-            )
-        except Exception:
-            # fallback: pick the first iframe
-            iframe = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-            )
+        # 1. รอและมุดเข้า iframe
+        print("กำลังค้นหา iframe...")
+        iframe = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+        )
         driver.switch_to.frame(iframe)
-        print("มุดเข้า iframe สำเร็จ! กำลังรอข้อมูลโหลด...")
-
-        # รอให้ตัวแปร stationsData มีข้อมูล (ข้อมูลถูกดึงมาแล้ว)
-        # เราใช้ JavaScript เพื่อดึงตัวแปรนั้นออกมาตรงๆ เลย จะได้ไม่ต้องแกะ HTML
-        # Wait for the stationsData variable to become available and populated.
-        # Using a lambda instead of a custom EC class allows us to run a JS
-        # snippet repeatedly until it returns a truthy value.  If the page
-        # implementation changes and stationsData is not defined the wait will
-        # time out after 30 seconds and be handled by the surrounding try/except.
+        print("มุดเข้า iframe สำเร็จ! กำลังจ้องตารางข้อมูล...")
+        
+        # 2. หัวใจสำคัญ: สั่งให้บอทรอจนกว่า <tr> (แถวข้อมูล) จะโผล่ขึ้นมาในตาราง (รอได้สูงสุด 30 วินาที)
         WebDriverWait(driver, 30).until(
-            lambda d: d.execute_script("return (typeof stationsData !== 'undefined') && stationsData.length > 0")
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#tbody-dash tr"))
         )
         
-        # ดึงข้อมูล JSON ออกมาตรงๆ
-        raw_data = driver.execute_script("return stationsData;")
-        print(f"ดึงข้อมูลดิบสำเร็จ พบทั้งหมด {len(raw_data)} ปั๊ม")
-
-        for item in raw_data:
-            # ตรวจสอบว่าเป็นปั๊มในอำเภออินทร์บุรีหรือไม่ (เช็คให้ชัวร์ว่าไม่เป็น None)
-            district = str(item.get('District', '')).strip()
-            name = str(item.get('StationName', '')).strip()
+        # ให้เวลาข้อมูลเรนเดอร์ลงตารางให้ครบอีกนิด
+        time.sleep(3)
+        
+        # 3. ดึง HTML มาแกะ
+        print("ข้อมูลโผล่แล้ว! กำลังดึงข้อมูลมาแกะ...")
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
+        tbody = soup.find('tbody', id='tbody-dash')
+        
+        if not tbody:
+            print("❌ หา tbody ไม่เจอ")
+            return stations
             
-            if name and "อินทร์บุรี" in district:
-                stations[name] = {
-                    "ดีเซล": str(item.get('Diesel', '-')).strip(),
-                    "G95": str(item.get('Gas95', '-')).strip(),
-                    "G91": str(item.get('Gas91', '-')).strip(),
-                    "E20": str(item.get('E20', '-')).strip(),
-                    "รถขนส่ง": str(item.get('TransportStatus', 'ปกติ')).strip(),
-                    "อำเภอ": district
-                }
-                print(f"✅ พบข้อมูล: {name}")
+        rows = tbody.find_all('tr')
+        print(f"พบข้อมูลปั๊มน้ำมันในตารางทั้งหมด {len(rows)} แถว")
+        
+        for tr in rows:
+            tds = tr.find_all('td')
+            # ตรวจสอบว่าคอลัมน์มาครบ 9 ช่อง
+            if len(tds) >= 9:
+                name = tds[0].text.strip()
+                diesel = tds[1].text.strip()
+                g95 = tds[2].text.strip()
+                g91 = tds[3].text.strip()
+                e20 = tds[4].text.strip()
+                
+                # ทำความสะอาดข้อความรถขนส่ง (เอาเว้นบรรทัดออก)
+                transport_raw = tds[5].text.strip()
+                transport = transport_raw.replace('\n', ' ').strip()
+                
+                district = tds[8].text.strip()
+                
+                # กรองเฉพาะปั๊มใน "อินทร์บุรี"
+                if "อินทร์บุรี" in district:
+                    stations[name] = {
+                        "ดีเซล": diesel,
+                        "G95": g95,
+                        "G91": g91,
+                        "E20": e20,
+                        "รถขนส่ง": transport,
+                        "อำเภอ": district
+                    }
+                    print(f"✅ ดึงข้อมูลสำเร็จ: {name}")
 
     except Exception as e:
-        # Print the exception for debugging.  Selenium sometimes raises a
-        # generic WebDriverException without an informative message; in that case
-        # let the caller know that something went wrong extracting the data.
-        print(f"⚠️ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+        print(f"⚠️ เกิดข้อผิดพลาดในการรอข้อมูล: {e}")
         
     finally:
         driver.quit()
@@ -110,7 +109,7 @@ def get_fuel_data():
 def main():
     current_data = get_fuel_data()
     if not current_data:
-        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี หรือโหลดข้อมูลไม่สำเร็จ")
+        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรีเลย อาจจะโหลดข้อมูลไม่ทัน")
         return
         
     old_data = {}
@@ -124,7 +123,6 @@ def main():
     changed_stations = []
     
     for station, details in current_data.items():
-        # ถ้าเป็นปั๊มใหม่ที่ไม่เคยมี หรือ ข้อมูลเปลี่ยน
         if station not in old_data or current_data[station] != old_data[station]:
             
             diesel_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
@@ -143,8 +141,6 @@ def main():
             
     if changed_stations:
         print(f"พบปั๊มในอินทร์บุรีที่สถานะเปลี่ยน {len(changed_stations)} แห่ง! กำลังส่งเข้า LINE...")
-        
-        # ถ้ายาวเกินไป LINE จะส่งไม่ผ่าน ให้หั่นส่งทีละนิดถ้าจำเป็น (แต่ 15 ปั๊มน่าจะผ่านสบายๆ)
         final_msg = "🔔 อัปเดตสถานะน้ำมัน อินทร์บุรี!\n\n" + "\n\n".join(changed_stations)
         send_message(final_msg)
         
