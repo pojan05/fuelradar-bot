@@ -1,8 +1,8 @@
 name: Auto Run Bot
 on:
   schedule:
-    - cron: '*/5 * * * *'  # สั่งให้ทำงานทุกๆ 5 นาที
-  workflow_dispatch:       # ทำให้เรากดปุ่มรันเองได้ด้วย
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,7 +18,8 @@ jobs:
           python-version: '3.10'
           
       - name: Install Tools
-        run: pip install requests
+        run: |
+          pip install requests beautifulsoup4 selenium webdriver-manager
         
       - name: Run Python Code
         env:
@@ -30,6 +31,6 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add data.txt
+          git add data.json
           git commit -m "update data" || echo "No changes"
           git push
