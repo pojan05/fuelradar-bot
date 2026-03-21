@@ -31,6 +31,7 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
+          touch data.json
           git add data.json
           git commit -m "update data" || echo "No changes"
           git push
