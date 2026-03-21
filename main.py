@@ -1,7 +1,11 @@
 import os
+import json
+import time
 import requests
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
-# ดึงรหัสลับจาก GitHub
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
 DATA_URL = "https://script.google.com/macros/s/AKfycbxflVoeKNYwHDhMFqoZkeKUR0AG5GI4jwfqefySHxXa6MnDdBn7NbTkT4NjN-WbgYQrMQ/exec"
@@ -18,27 +22,87 @@ def send_message(text):
     }
     requests.post(url, headers=headers, json=payload)
 
-def main():
-    print("กำลังดึงข้อมูลจากเว็บ...")
-    response = requests.get(DATA_URL)
-    current_data = response.text
+def get_fuel_data():
+    print("กำลังเปิดเบราว์เซอร์จำลองเพื่อดึงข้อมูล...")
+    options = Options()
+    options.add_argument('--headless') # ทำงานแบบซ่อนหน้าต่าง
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
     
-    # อ่านข้อมูลเก่าที่เคยบันทึกไว้
-    old_data = ""
-    if os.path.exists("data.txt"):
-        with open("data.txt", "r", encoding="utf-8") as f:
-            old_data = f.read()
-            
-    # ถ้าข้อมูลใหม่ ไม่เหมือน ข้อมูลเก่า แปลว่ามีการอัปเดต!
-    if current_data != old_data:
-        print("พบข้อมูลอัปเดต! กำลังแจ้งเตือนผ่าน LINE...")
-        send_message("⛽ ระบบ FuelRadar มีการอัปเดตข้อมูลสถานะน้ำมันครับ!")
+    driver = webdriver.Chrome(options=options)
+    driver.get(DATA_URL)
+    
+    # ให้บอทรอ 8 วินาที เพื่อให้ข้อมูลน้ำมันโหลดจนครบ
+    time.sleep(8) 
+    
+    html = driver.page_source
+    driver.quit()
+    
+    # ใช้ BeautifulSoup แกะข้อมูล HTML ตามภาพที่คุณส่งมา
+    soup = BeautifulSoup(html, 'html.parser')
+    tbody = soup.find('tbody', id='tbody-dash')
+    
+    stations = {}
+    if not tbody:
+        print("❌ ไม่พบตารางข้อมูล (หน้าเว็บอาจจะยังโหลดไม่เสร็จ)")
+        return stations
         
-        # บันทึกข้อมูลใหม่ลงไปจำไว้
-        with open("data.txt", "w", encoding="utf-8") as f:
-            f.write(current_data)
+    for tr in tbody.find_all('tr'):
+        tds = tr.find_all('td')
+        if len(tds) >= 9:
+            name = tds[0].text.strip()
+            diesel = tds[1].text.strip()
+            g95 = tds[2].text.strip()
+            g91 = tds[3].text.strip()
+            e20 = tds[4].text.strip()
+            # จัดรูปแบบตัวหนังสือรถขนส่งให้สวยงาม
+            transport = tds[5].text.strip().replace('\n', ' ') 
+            
+            stations[name] = {
+                "ดีเซล": diesel, "G95": g95, "G91": g91, "E20": e20, "รถขนส่ง": transport
+            }
+    return stations
+
+def main():
+    current_data = get_fuel_data()
+    if not current_data:
+        return
+        
+    # โหลดข้อมูลเก่ามาเช็ค
+    old_data = {}
+    if os.path.exists("data.json"):
+        with open("data.json", "r", encoding="utf-8") as f:
+            old_data = json.load(f)
+            
+    changed_stations = []
+    
+    # เทียบข้อมูลปั๊มต่อปั๊มว่ามีอะไรเปลี่ยนไปบ้าง
+    for station, details in current_data.items():
+        if station not in old_data or current_data[station] != old_data[station]:
+            
+            # ตกแต่งไอคอนให้ดูง่าย
+            diesel_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
+            g95_icon = "❌" if "หมด" in details['G95'] else "✅"
+            
+            msg = f"📍 {station}\n"
+            msg += f"ดีเซล: {diesel_icon} {details['ดีเซล']} | G95: {g95_icon} {details['G95']}\n"
+            msg += f"รถขนส่ง: 🚚 {details['รถขนส่ง']}"
+            changed_stations.append(msg)
+            
+    if changed_stations:
+        print(f"พบปั๊มที่สถานะเปลี่ยน {len(changed_stations)} แห่ง! กำลังส่งเข้า LINE...")
+        
+        # เอาข้อมูลที่เปลี่ยนมารวมกันเป็น 1 ข้อความ
+        final_msg = "🔔 อัปเดตสถานะน้ำมันสิงห์บุรี!\n\n" + "\n\n".join(changed_stations)
+        
+        # ส่งข้อความ
+        send_message(final_msg)
+        
+        # บันทึกข้อมูลล่าสุดทับลงไป
+        with open("data.json", "w", encoding="utf-8") as f:
+            json.dump(current_data, f, ensure_ascii=False, indent=2)
     else:
-        print("ข้อมูลเหมือนเดิม ยังไม่มีอะไรเปลี่ยนแปลง")
+        print("✅ ข้อมูลสถานะน้ำมันยังเหมือนเดิม ไม่มีอัปเดตใหม่")
 
 if __name__ == "__main__":
     main()
