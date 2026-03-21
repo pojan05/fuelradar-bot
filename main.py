@@ -25,25 +25,37 @@ def send_message(text):
         "to": LINE_TO_ID,
         "messages": [{"type": "text", "text": text}]
     }
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code != 200:
-        print(f"❌ แจ้งเตือน LINE ไม่สำเร็จ: {response.text}")
+    requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
-    print("กำลังเปิดเบราว์เซอร์จำลอง (โหมดพรางตัวขั้นสูง)...")
+    print("กำลังเปิดเบราว์เซอร์จำลอง (โหมดปลดล็อคคุกกี้ขั้นสูง)...")
     options = Options()
-    
-    # 🌟 จุดสำคัญ: เปลี่ยนมาใช้ Headless โหมดใหม่ที่ Google จับยากขึ้น
     options.add_argument('--headless=new') 
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
-    
-    # 🌟 จุดสำคัญ: สวมหน้ากากเป็นผู้ใช้งาน Chrome บน Windows 10 ปกติ
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
+    
+    # 🌟 1. ลบป้ายทะเบียนบอท ไม่ให้ Google รู้ว่าใช้โปรแกรมอัตโนมัติ
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
+    # 🌟 2. อนุญาตให้ใช้ Third-Party Cookies (หัวใจสำคัญที่ทำให้ Google Apps Script โหลดข้อมูลได้)
+    prefs = {
+        "profile.default_content_setting_values.cookies": 1,
+        "profile.cookie_controls_mode": 0
+    }
+    options.add_experimental_option("prefs", prefs)
     
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
+    
+    # 🌟 3. สคริปต์ลบคำว่า "webdriver" ออกจากเบราว์เซอร์
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+    
     stations = {}
     
     try:
@@ -60,25 +72,22 @@ def get_fuel_data():
             )
             
         driver.switch_to.frame(iframe)
-        print("มุดเข้า iframe สำเร็จ! กำลังรอตารางน้ำมันโหลด (อาจใช้เวลาถึง 45 วินาที)...")
+        print("มุดเข้า iframe สำเร็จ! กำลังรอตารางน้ำมันโหลด...")
 
         try:
-            # เพิ่มเวลารอเป็น 45 วินาที ให้ระบบดึงข้อมูลให้เสร็จ
+            # รอให้แถวข้อมูลโผล่
             WebDriverWait(driver, 45).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "#tbody-dash tr"))
             )
         except Exception as wait_error:
-            # เช็คว่าติดปัญหาอะไรเผื่อโหลดไม่ขึ้น
+            # ถ้าพลาดอีก เราจะให้มันปรินต์ข้อความบนหน้าจอออกมาดูเลยว่าติดอะไร!
             html_check = driver.page_source
-            if "กำลังโหลดข้อมูล" in html_check:
-                print("⚠️ บอทติดอยู่ที่หน้า 'กำลังโหลดข้อมูล' (Google อาจยังจับได้ว่าเราเป็นบอท)")
-            else:
-                print("⚠️ หน้าเว็บโหลดเสร็จแต่หาตารางไม่เจอ")
+            soup_check = BeautifulSoup(html_check, 'html.parser')
+            text_on_screen = soup_check.body.text.strip()[:200] if soup_check.body else "หน้าจอว่างเปล่า"
+            print(f"⚠️ แจ้งเตือน: โหลดข้อมูลไม่สำเร็จ! ข้อความบนหน้าจอตอนนี้คือ: {text_on_screen}")
             raise wait_error
         
-        # ให้เวลาข้อมูลโหลดเข้าตารางให้ครบ
         time.sleep(3)
-        
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         tbody = soup.find('tbody', id='tbody-dash')
