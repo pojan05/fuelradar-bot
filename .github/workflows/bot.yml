@@ -19,7 +19,7 @@ jobs:
           
       - name: Install Tools
         run: |
-          pip install requests beautifulsoup4 selenium webdriver-manager
+          pip install requests beautifulsoup4 selenium webdriver-manager selenium-wire blinker==1.7.0
         
       - name: Run Python Code
         env:
