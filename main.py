@@ -2,8 +2,13 @@ import os
 import json
 import time
 import requests
-from seleniumwire import webdriver # ใช้ selenium-wire แทน
+from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
@@ -19,69 +24,83 @@ def send_message(text):
         "to": LINE_TO_ID,
         "messages": [{"type": "text", "text": text}]
     }
-    requests.post(url, headers=headers, json=payload)
+    response = requests.post(url, headers=headers, json=payload)
+    if response.status_code != 200:
+        print(f"❌ แจ้งเตือน LINE ไม่สำเร็จ: {response.text}")
 
 def get_fuel_data():
-    print("กำลังเปิดเบราว์เซอร์จำลอง (ระบบดักจับ API)...")
+    print("กำลังเปิดเบราว์เซอร์จำลองเพื่อดึงข้อมูล...")
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--ignore-certificate-errors') # ข้ามปัญหาใบรับรอง
     
-    driver = webdriver.Chrome(options=options)
+    # When running in environments like GitHub Actions the chromedriver binary may
+    # not already be installed on the runner.  Using webdriver‑manager to fetch
+    # a matching chromedriver avoids version mismatch issues.  If the environment
+    # already provides a bundled driver (e.g. in a Docker container) this will
+    # simply return the existing binary.
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     stations = {}
     
     try:
-        print("กำลังเปิดเว็บและดักจับข้อมูล...")
         driver.get(DATA_URL)
         
-        # รอให้เบราว์เซอร์ดาวน์โหลดข้อมูลทั้งหมด 15 วินาที
-        time.sleep(15)
+        print("กำลังรอและมุดเข้า iframe...")
+        # Some versions of the FuelRadar web app change the id of the sandbox
+        # iframe over time.  Try to locate it by id first; if not found fall
+        # back to the first iframe on the page.  Then switch into that frame
+        # before executing any scripts.  A generous wait helps with slow
+        # network connections.
+        try:
+            iframe = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.ID, "sandboxFrame"))
+            )
+        except Exception:
+            # fallback: pick the first iframe
+            iframe = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+            )
+        driver.switch_to.frame(iframe)
+        print("มุดเข้า iframe สำเร็จ! กำลังรอข้อมูลโหลด...")
+
+        # รอให้ตัวแปร stationsData มีข้อมูล (ข้อมูลถูกดึงมาแล้ว)
+        # เราใช้ JavaScript เพื่อดึงตัวแปรนั้นออกมาตรงๆ เลย จะได้ไม่ต้องแกะ HTML
+        # Wait for the stationsData variable to become available and populated.
+        # Using a lambda instead of a custom EC class allows us to run a JS
+        # snippet repeatedly until it returns a truthy value.  If the page
+        # implementation changes and stationsData is not defined the wait will
+        # time out after 30 seconds and be handled by the surrounding try/except.
+        WebDriverWait(driver, 30).until(
+            lambda d: d.execute_script("return (typeof stationsData !== 'undefined') && stationsData.length > 0")
+        )
         
-        # ค้นหาคำร้องขอ (Request) ที่มีข้อมูลน้ำมัน
-        found_data = False
-        print("กำลังวิเคราะห์ข้อมูลจราจรบนเว็บ...")
-        
-        for request in driver.requests:
-            if request.response:
-                # ลองอ่านข้อมูลที่ตอบกลับมา
-                try:
-                    body_bytes = request.response.body
-                    if not body_bytes:
-                        continue
-                        
-                    body_str = body_bytes.decode('utf-8')
-                    
-                    # เช็คว่าใช่ข้อมูล JSON ของปั๊มน้ำมันไหม (มักจะมีคำว่า StationName)
-                    if '"StationName"' in body_str and '"Diesel"' in body_str:
-                        raw_data = json.loads(body_str)
-                        print(f"✅ ดักจับ API สำเร็จ! พบข้อมูล {len(raw_data)} ปั๊ม")
-                        
-                        for item in raw_data:
-                            district = str(item.get('District', '')).strip()
-                            name = str(item.get('StationName', '')).strip()
-                            
-                            if name and "อินทร์บุรี" in district:
-                                stations[name] = {
-                                    "ดีเซล": str(item.get('Diesel', '-')).strip(),
-                                    "G95": str(item.get('Gas95', '-')).strip(),
-                                    "G91": str(item.get('Gas91', '-')).strip(),
-                                    "E20": str(item.get('E20', '-')).strip(),
-                                    "รถขนส่ง": str(item.get('TransportStatus', 'ปกติ')).strip(),
-                                    "อำเภอ": district
-                                }
-                        found_data = True
-                        break # เจอข้อมูลแล้ว หยุดหาได้
-                except Exception as e:
-                    # บาง request อ่านไม่ได้ ให้ข้ามไป
-                    pass
-        
-        if not found_data:
-            print("❌ ไม่พบ API ที่มีข้อมูลน้ำมัน (เว็บอาจจะยังโหลดไม่เสร็จ หรือโดนบล็อก)")
+        # ดึงข้อมูล JSON ออกมาตรงๆ
+        raw_data = driver.execute_script("return stationsData;")
+        print(f"ดึงข้อมูลดิบสำเร็จ พบทั้งหมด {len(raw_data)} ปั๊ม")
+
+        for item in raw_data:
+            # ตรวจสอบว่าเป็นปั๊มในอำเภออินทร์บุรีหรือไม่ (เช็คให้ชัวร์ว่าไม่เป็น None)
+            district = str(item.get('District', '')).strip()
+            name = str(item.get('StationName', '')).strip()
             
+            if name and "อินทร์บุรี" in district:
+                stations[name] = {
+                    "ดีเซล": str(item.get('Diesel', '-')).strip(),
+                    "G95": str(item.get('Gas95', '-')).strip(),
+                    "G91": str(item.get('Gas91', '-')).strip(),
+                    "E20": str(item.get('E20', '-')).strip(),
+                    "รถขนส่ง": str(item.get('TransportStatus', 'ปกติ')).strip(),
+                    "อำเภอ": district
+                }
+                print(f"✅ พบข้อมูล: {name}")
+
     except Exception as e:
-        print(f"⚠️ เกิดข้อผิดพลาดในระบบหลัก: {e}")
+        # Print the exception for debugging.  Selenium sometimes raises a
+        # generic WebDriverException without an informative message; in that case
+        # let the caller know that something went wrong extracting the data.
+        print(f"⚠️ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
         
     finally:
         driver.quit()
@@ -91,7 +110,7 @@ def get_fuel_data():
 def main():
     current_data = get_fuel_data()
     if not current_data:
-        print("⚠️ ไม่ได้ข้อมูลกลับมาเลย หยุดการทำงานชั่วคราว")
+        print("⚠️ ไม่พบข้อมูลปั๊มในอินทร์บุรี หรือโหลดข้อมูลไม่สำเร็จ")
         return
         
     old_data = {}
@@ -105,7 +124,9 @@ def main():
     changed_stations = []
     
     for station, details in current_data.items():
+        # ถ้าเป็นปั๊มใหม่ที่ไม่เคยมี หรือ ข้อมูลเปลี่ยน
         if station not in old_data or current_data[station] != old_data[station]:
+            
             diesel_icon = "❌" if "หมด" in details['ดีเซล'] else "✅"
             g95_icon = "❌" if "หมด" in details['G95'] else "✅"
             
@@ -121,7 +142,9 @@ def main():
             changed_stations.append(msg)
             
     if changed_stations:
-        print(f"พบปั๊มในอินทร์บุรีอัปเดต {len(changed_stations)} แห่ง! กำลังส่งเข้า LINE...")
+        print(f"พบปั๊มในอินทร์บุรีที่สถานะเปลี่ยน {len(changed_stations)} แห่ง! กำลังส่งเข้า LINE...")
+        
+        # ถ้ายาวเกินไป LINE จะส่งไม่ผ่าน ให้หั่นส่งทีละนิดถ้าจำเป็น (แต่ 15 ปั๊มน่าจะผ่านสบายๆ)
         final_msg = "🔔 อัปเดตสถานะน้ำมัน อินทร์บุรี!\n\n" + "\n\n".join(changed_stations)
         send_message(final_msg)
         
