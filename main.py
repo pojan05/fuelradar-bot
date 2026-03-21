@@ -2,6 +2,8 @@ import os
 import json
 import time
 import requests
+import datetime
+import pytz  # สำหรับจัดการเวลาไทย
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -21,7 +23,6 @@ def send_message(text):
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {LINE_TOKEN}'
     }
-    # หั่นส่งครั้งละไม่เกิน 5,000 ตัวอักษรตามเกณฑ์ของ LINE
     payload = {
         "to": LINE_TO_ID,
         "messages": [{"type": "text", "text": text[:5000]}]
@@ -43,7 +44,6 @@ def get_fuel_data():
     
     try:
         driver.get(DATA_URL)
-        # มุดเข้าห้องลับ 2 ชั้นเพื่อเข้าถึงข้อมูลตารางที่แท้จริง
         iframe1 = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
         driver.switch_to.frame(iframe1)
         
@@ -51,7 +51,6 @@ def get_fuel_data():
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
         
-        # รอจนกว่าตารางข้อมูล (tbody-dash) จะปรากฏ
         WebDriverWait(driver, 35).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
         time.sleep(5) 
         
@@ -89,6 +88,22 @@ def main():
     if not current_data:
         return
         
+    # --- ส่วนที่เพิ่มใหม่: ส่งสรุปรายวัน 06.00 น. (เวลาไทย) ---
+    tz = pytz.timezone('Asia/Bangkok')
+    now = datetime.datetime.now(tz)
+    
+    # หากรันในช่วง 06:00 - 06:10 น. จะส่งสรุปภาพรวมปั๊มทั้งหมด
+    if now.hour == 6 and now.minute < 11:
+        summary_list = []
+        for station, d in current_data.items():
+            d_icon = "✅" if "มี" in d['ดีเซล'] else "❌" if "หมด" in d['ดีเซล'] else "⚪"
+            summary_list.append(f"📍 {station}: {d_icon}")
+            
+        summary_msg = "🌅 สรุปสถานะน้ำมันเช้านี้ (อินทร์บุรี)\n\n" + "\n".join(summary_list)
+        send_message(summary_msg)
+        print("☀️ ส่งรายงานสรุปยามเช้าเรียบร้อยแล้ว")
+    # ---------------------------------------------------
+
     old_data = {}
     if os.path.exists("data.json"):
         with open("data.json", "r", encoding="utf-8") as f:
@@ -97,10 +112,8 @@ def main():
             
     updates = []
     for station, d in current_data.items():
-        # ตรวจสอบการเปลี่ยนแปลงทุกฟิลด์ (สถานะน้ำมันทุกชนิด, รถขนส่ง, และเวลาอัปเดต)
         if station not in old_data or current_data[station] != old_data[station]:
             
-            # ฟังก์ชันช่วยเปลี่ยนข้อความ "มี/หมด" เป็นไอคอนเพื่อความสวยงาม
             def get_icon(status):
                 return "✅" if "มี" in status else "❌" if "หมด" in status else "⚪"
 
@@ -108,7 +121,6 @@ def main():
             msg += f"⛽ ดีเซล:{get_icon(d['ดีเซล'])} {d['ดีเซล']} | G95:{get_icon(d['G95'])} {d['G95']}\n"
             msg += f"⛽ G91:{get_icon(d['G91'])} {d['G91']} | E20:{get_icon(d['E20'])} {d['E20']}\n"
             
-            # ตรวจสอบสถานะรถขนส่ง
             trans_icon = "🚚" if "จัดส่ง" in d['รถขนส่ง'] else "✅"
             msg += f"{trans_icon} รถขนส่ง: {d['รถขนส่ง']}\n"
             msg += f"🕒 อัปเดตล่าสุด: {d['อัปเดตล่าสุด']}"
@@ -117,7 +129,6 @@ def main():
             
     if updates:
         print(f"พบการเปลี่ยนแปลง {len(updates)} แห่ง กำลังแจ้งเตือน...")
-        # หั่นส่งทีละ 5 ปั๊มเพื่อให้ข้อความไม่ยาวเกินไปและดูอ่านง่าย
         for i in range(0, len(updates), 5):
             chunk = updates[i:i+5]
             final_msg = "🔔 แจ้งอัปเดตน้ำมัน (อินทร์บุรี)\n\n" + "\n\n".join(chunk)
