@@ -2,8 +2,6 @@ import os
 import json
 import time
 import requests
-import datetime
-import pytz
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -17,112 +15,119 @@ LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
 DATA_URL = "https://script.google.com/macros/s/AKfycbxflVoeKNYwHDhMFqoZkeKUR0AG5GI4jwfqefySHxXa6MnDdBn7NbTkT4NjN-WbgYQrMQ/exec"
 
-def create_station_row(name, d):
-    # สร้างแถวข้อมูลปั๊มแบบประหยัดพื้นที่
-    def get_dot(status):
-        return "🟢" if "มี" in status else "🔴" if "หมด" in status else "⚪"
-    
-    return {
-        "type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm",
-        "contents": [
-            {"type": "box", "layout": "horizontal", "contents": [
-                {"type": "text", "text": f"📍 {name}", "weight": "bold", "size": "sm", "flex": 4, "color": "#111111", "wrap": True},
-                {"type": "button", "action": {"type": "uri", "label": "แผนที่", "uri": d['map_url']}, "flex": 2, "height": "xs", "style": "secondary", "color": "#eeeeee"}
-            ]},
-            {"type": "box", "layout": "horizontal", "contents": [
-                {"type": "text", "text": f"D:{get_dot(d['ดีเซล'])} | 95:{get_dot(d['G95'])} | 91:{get_dot(d['G91'])} | E20:{get_dot(d['E20'])}", "size": "xs", "color": "#555555", "flex": 4},
-                {"type": "text", "text": d['อัปเดตล่าสุด'], "size": "xxs", "color": "#aaaaaa", "align": "end", "flex": 2}
-            ]},
-            {"type": "text", "text": f"🚚 {d['รถขนส่ง']}", "size": "xxs", "color": "#999999"},
-            {"type": "separator", "margin": "md"}
-        ]
-    }
-
-def create_list_bubble(title, station_chunk):
-    # สร้าง Bubble ขนาดใหญ่ที่บรรจุปั๊มได้หลายแห่ง
-    rows = [create_station_row(name, data) for name, data in station_chunk.items()]
-    return {
-        "type": "bubble",
-        "header": {"type": "box", "layout": "vertical", "backgroundColor": "#f39c12", "contents": [{"type": "text", "text": title, "color": "#ffffff", "weight": "bold", "size": "md"}]},
-        "body": {"type": "box", "layout": "vertical", "contents": rows}
-    }
-
-def send_flex(bubbles, alt_text):
+def send_message(text):
     url = 'https://api.line.me/v2/bot/message/push'
-    headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_TOKEN}'}
-    # ส่ง 1 Push Message บรรจุได้สูงสุด 12 Bubbles (เราส่งแค่ 1-2 แผ่นก็ครบ 16 ปั๊มแล้ว)
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_TOKEN}'
+    }
+    # หั่นส่งครั้งละไม่เกิน 5,000 ตัวอักษรตามเกณฑ์ของ LINE
     payload = {
         "to": LINE_TO_ID,
-        "messages": [{
-            "type": "flex",
-            "altText": alt_text,
-            "contents": {"type": "carousel", "contents": bubbles[:12]}
-        }]
+        "messages": [{"type": "text", "text": text[:5000]}]
     }
     requests.post(url, headers=headers, json=payload)
 
 def get_fuel_data():
+    print("กำลังดึงข้อมูลด้วยระบบเจาะ 2 ชั้น (เน้นความแม่นยำสูง)...")
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
+    
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     stations = {}
+    
     try:
         driver.get(DATA_URL)
+        # มุดเข้าห้องลับ 2 ชั้นเพื่อเข้าถึงข้อมูลตารางที่แท้จริง
         iframe1 = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
         driver.switch_to.frame(iframe1)
+        
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
+        
+        # รอจนกว่าตารางข้อมูล (tbody-dash) จะปรากฏ
         WebDriverWait(driver, 35).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
-        time.sleep(5)
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        time.sleep(5) 
+        
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'html.parser')
         tbody = soup.find('tbody', id='tbody-dash')
+        
         if tbody:
-            for tr in tbody.find_all('tr'):
+            rows = tbody.find_all('tr')
+            for tr in rows:
                 tds = tr.find_all('td')
-                if len(tds) >= 10 and "อินทร์บุรี" in tds[8].text:
+                if len(tds) >= 9:
                     name = tds[0].text.strip()
-                    stations[name] = {
-                        "ดีเซล": tds[1].text.strip(), "G95": tds[2].text.strip(),
-                        "G91": tds[3].text.strip(), "E20": tds[4].text.strip(),
-                        "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
-                        "อัปเดตล่าสุด": tds[6].text.strip(),
-                        "map_url": tds[9].find('a')['href'] if tds[9].find('a') else "https://www.google.com/maps"
-                    }
-    finally: driver.quit()
+                    district = tds[8].text.strip()
+                    
+                    if "อินทร์บุรี" in district:
+                        stations[name] = {
+                            "ดีเซล": tds[1].text.strip(),
+                            "G95": tds[2].text.strip(),
+                            "G91": tds[3].text.strip(),
+                            "E20": tds[4].text.strip(),
+                            "รถขนส่ง": tds[5].text.strip().replace('\n', ' '),
+                            "อัปเดตล่าสุด": tds[6].text.strip(),
+                            "อำเภอ": district
+                        }
+                        print(f"✅ อ่านข้อมูลสำเร็จ: {name}")
+    except Exception as e:
+        print(f"⚠️ เกิดข้อผิดพลาด: {e}")
+    finally:
+        driver.quit()
     return stations
 
 def main():
     current_data = get_fuel_data()
-    if not current_data: return
-    
-    tz = pytz.timezone('Asia/Bangkok')
-    now = datetime.datetime.now(tz)
-    
-    # 🕒 1. สรุปเช้า 06.00 น. (รวมเป็นแผ่นเดียวจบ)
-    if now.hour == 6 and now.minute < 11:
-        items = list(current_data.items())
-        # แบ่งเป็น 2 แผ่น แผ่นละ 8-9 ปั๊ม เพื่อความสวยงามไม่ยาวเกินไป
-        bubble1 = create_list_bubble("🌅 สรุปน้ำมันเช้านี้ (1/2)", dict(items[:8]))
-        bubble2 = create_list_bubble("🌅 สรุปน้ำมันเช้านี้ (2/2)", dict(items[8:]))
-        send_flex([bubble1, bubble2], "สรุปน้ำมันยามเช้าอินทร์บุรี")
-
-    # 🔔 2. แจ้งเตือนเมื่อเปลี่ยน (รวมรายการที่เปลี่ยนไว้ในแผ่นเดียว)
+    if not current_data:
+        return
+        
     old_data = {}
     if os.path.exists("data.json"):
         with open("data.json", "r", encoding="utf-8") as f:
             try: old_data = json.load(f)
-            except: pass
+            except: old_data = {}
             
-    changes = {s: d for s, d in current_data.items() if s not in old_data or d != old_data[s]}
+    updates = []
+    for station, d in current_data.items():
+        # ตรวจสอบการเปลี่ยนแปลงทุกฟิลด์ (สถานะน้ำมันทุกชนิด, รถขนส่ง, และเวลาอัปเดต)
+        if station not in old_data or current_data[station] != old_data[station]:
             
-    if changes:
-        bubble = create_list_bubble("🔔 พบการอัปเดตน้ำมัน!", changes)
-        send_flex([bubble], "มีอัปเดตน้ำมันใหม่!")
+            # ฟังก์ชันช่วยเปลี่ยนข้อความ "มี/หมด" เป็นไอคอนเพื่อความสวยงาม
+            def get_icon(status):
+                return "✅" if "มี" in status else "❌" if "หมด" in status else "⚪"
+
+            msg = f"📍 {station}\n"
+            msg += f"⛽ ดีเซล:{get_icon(d['ดีเซล'])} {d['ดีเซล']} | G95:{get_icon(d['G95'])} {d['G95']}\n"
+            msg += f"⛽ G91:{get_icon(d['G91'])} {d['G91']} | E20:{get_icon(d['E20'])} {d['E20']}\n"
+            
+            # ตรวจสอบสถานะรถขนส่ง
+            trans_icon = "🚚" if "จัดส่ง" in d['รถขนส่ง'] else "✅"
+            msg += f"{trans_icon} รถขนส่ง: {d['รถขนส่ง']}\n"
+            msg += f"🕒 อัปเดตล่าสุด: {d['อัปเดตล่าสุด']}"
+            
+            updates.append(msg)
+            
+    if updates:
+        print(f"พบการเปลี่ยนแปลง {len(updates)} แห่ง กำลังแจ้งเตือน...")
+        # หั่นส่งทีละ 5 ปั๊มเพื่อให้ข้อความไม่ยาวเกินไปและดูอ่านง่าย
+        for i in range(0, len(updates), 5):
+            chunk = updates[i:i+5]
+            final_msg = "🔔 แจ้งอัปเดตน้ำมัน (อินทร์บุรี)\n\n" + "\n\n".join(chunk)
+            send_message(final_msg)
+            time.sleep(2)
+            
         with open("data.json", "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=False, indent=2)
+    else:
+        print("✅ ข้อมูลยังเป็นปัจจุบัน ไม่มีการเปลี่ยนแปลงจากหน้าเว็บหลัก")
 
 if __name__ == "__main__":
     main()
