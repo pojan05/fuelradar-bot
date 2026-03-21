@@ -4,13 +4,13 @@
 <meta name="chromevox" content-script="no">
 <title>FuelRadar Admin &amp; Dashboard</title>
 <meta name="viewport"content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" nonce="3eRgoRo_cpj9CixDRx2bYQ"><link rel="stylesheet" href="/static/macros/client/css/2107809627-mae_html_css_ltr.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" nonce="-6o5O-dIlRkIB25KYh57wA"><link rel="stylesheet" href="/static/macros/client/css/2107809627-mae_html_css_ltr.css">
 <script type="text/javascript" src="/static/macros/client/js/1089767606-warden_bin_i18n_warden.js"></script>
 </head>
 <body>
 <table id="warning-bar-table" class="full_size" cellspacing="0" cellpadding="0"><tr><td><div id="warning" class="warning-bar"></div></td></tr><tr><td style="height: 100%"><iframe id="sandboxFrame" title="FuelRadar Admin &amp; Dashboard" allow="accelerometer *; ambient-light-sensor *; autoplay *; clipboard-read *; clipboard-write *; encrypted-media *; fullscreen *; geolocation *; gyroscope *; local-network-access *; magnetometer *; midi *; payment *; picture-in-picture *; screen-wake-lock *; speaker *; sync-xhr *; vibrate *; vr *; web-share *" sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts allow-top-navigation-by-user-activation allow-storage-access-by-user-activation">
 </iframe>
-</td></tr></table><script nonce="wO-ustxFPs8D6p3uZEvO2g">
+</td></tr></table><script nonce="nVZemzkx_cFFcDFz6jrElg">
 (function() {
 var el = document.getElementById('sandboxFrame');
 el.onload = function() {
