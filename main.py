@@ -14,10 +14,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
-# ดึงค่า Secrets บอทตัวที่ 1
+# ดึงค่า Secrets
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
-# ดึงค่า Secrets บอทตัวที่ 2
 LINE_TOKEN_2 = os.environ.get("LINE_TOKEN_2")
 LINE_TO_ID_2 = os.environ.get("LINE_TO_ID_2")
 
@@ -25,42 +24,31 @@ DATA_URL = "https://script.google.com/macros/s/AKfycbxflVoeKNYwHDhMFqoZkeKUR0AG5
 
 def send_message(text):
     url = 'https://api.line.me/v2/bot/message/push'
-    
-    # รวมบอททั้งหมดไว้ใน List เพื่อวนลูปส่งทีเดียว
     targets = [
         {"token": LINE_TOKEN, "to_id": LINE_TO_ID, "name": "Bot 1"},
-        {"token": LINE_TOKEN_2, "to_id": LINE_TO_ID_2, "name": "Bot 2 (AlienBot)"}
+        {"token": LINE_TOKEN_2, "to_id": LINE_TO_ID_2, "name": "Bot 2 (Alieninburi)"} # ปรับชื่อตามที่คุณเคยแก้ไข [cite: 1]
     ]
     
     for target in targets:
         token = target["token"]
         to_id = target["to_id"]
-        bot_name = target["name"]
-        
-        # ข้ามถ้าไม่ได้ใส่ค่า Secret ไว้ (ป้องกัน Error)
-        if not token or not to_id:
-            continue
+        if not token or not to_id: continue
             
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {token}'
-        }
-        payload = {
-            "to": to_id,
-            "messages": [{"type": "text", "text": text[:5000]}]
-        }
+        headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
+        payload = {"to": to_id, "messages": [{"type": "text", "text": text[:5000]}]}
         try:
             res = requests.post(url, headers=headers, json=payload)
             res.raise_for_status()
         except Exception as e:
-            print(f"❌ ส่ง LINE ไม่สำเร็จ ({bot_name}): {e}")
+            print(f"❌ ส่ง LINE ไม่สำเร็จ ({target['name']}): {e}")
 
-def get_fuel_data():
-    print("🔍 เริ่มต้นการดึงข้อมูล (Headless Chrome)...")
+def scrape_logic():
+    """ฟังก์ชันหลักในการดึงข้อมูลจากเว็บ"""
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
     options.add_argument('--window-size=1920,1080')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36')
     
@@ -70,34 +58,18 @@ def get_fuel_data():
     
     try:
         driver.get(DATA_URL)
+        # รอ Sandbox Frame
+        iframe1 = WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
+        driver.switch_to.frame(iframe1)
         
-        # ด่านที่ 1: รอ Sandbox Frame
-        try:
-            iframe1 = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "sandboxFrame")))
-            driver.switch_to.frame(iframe1)
-            print("➡️ เข้าสู่ชั้นที่ 1 (Sandbox) สำเร็จ")
-        except TimeoutException:
-            print("⚠️ Error: หา sandboxFrame ไม่เจอ (หน้าเว็บอาจโหลดช้าหรือเปลี่ยนโครงสร้าง)")
-            return {}
-
-        # ด่านที่ 2: รอ Iframe เนื้อหาภายใน
-        try:
-            WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
-            iframe2 = driver.find_element(By.TAG_NAME, "iframe")
-            driver.switch_to.frame(iframe2)
-            print("➡️ เข้าสู่ชั้นที่ 2 (Content) สำเร็จ")
-        except (TimeoutException, NoSuchElementException):
-            print("⚠️ Error: หา Content Iframe ไม่เจอ")
-            return {}
-
-        # ด่านที่ 3: รอข้อมูลตาราง
-        try:
-            WebDriverWait(driver, 40).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
-            time.sleep(3) # ให้เวลาระบบ Render ตารางเล็กน้อย
-            print("✅ พบตารางข้อมูลแล้ว กำลังประมวลผล...")
-        except TimeoutException:
-            print("⚠️ Error: ตารางข้อมูล (#tbody-dash) ไม่แสดงผลภายในเวลาที่กำหนด")
-            return {}
+        # รอ Content Iframe
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
+        iframe2 = driver.find_element(By.TAG_NAME, "iframe")
+        driver.switch_to.frame(iframe2)
+        
+        # รอข้อมูลตาราง (เพิ่มเวลารอเป็น 60 วินาทีสำหรับ GitHub)
+        WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
+        time.sleep(5) # รอให้ JS Render ข้อมูลจนครบ
         
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
@@ -110,7 +82,6 @@ def get_fuel_data():
                 if len(tds) >= 9:
                     name = tds[0].text.strip()
                     district = tds[8].text.strip()
-                    
                     if "อินทร์บุรี" in district:
                         stations[name] = {
                             "ดีเซล": tds[1].text.strip(),
@@ -121,25 +92,32 @@ def get_fuel_data():
                             "อัปเดตล่าสุด": tds[6].text.strip(),
                             "อำเภอ": district
                         }
-            print(f"📊 ดึงข้อมูลเสร็จสิ้น พบปั๊มในอินทร์บุรีทั้งหมด {len(stations)} แห่ง")
-    except Exception as e:
-        print(f"🧨 เกิดข้อผิดพลาดที่ไม่คาดคิด: {e}")
     finally:
         driver.quit()
     return stations
 
+def get_fuel_data_with_retry(max_retries=3):
+    """ระบบ Retry หากดึงข้อมูลได้ 0 แห่ง"""
+    for i in range(max_retries):
+        print(f"🔍 พยายามดึงข้อมูล ครั้งที่ {i+1}/{max_retries}...")
+        data = scrape_logic()
+        if data:
+            print(f"✅ ดึงข้อมูลสำเร็จ! พบปั๊ม {len(data)} แห่ง")
+            return data
+        print("⚠️ รอบนี้ไม่พบข้อมูล (อาจเพราะเว็บโหลดไม่ทัน) กำลังรอเพื่อลองใหม่...")
+        time.sleep(10)
+    return {}
+
 def main():
-    # ตั้งค่าเวลาไทย
     tz = pytz.timezone('Asia/Bangkok')
     thai_now = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
     print("-" * 30)
-    print(f"🚀 Bot Start Time (Thai): {thai_now}")
-    print("-" * 30)
-
-    current_data = get_fuel_data()
+    print(f"🚀 Bot Start: {thai_now}")
+    
+    current_data = get_fuel_data_with_retry()
     
     if not current_data:
-        print("🛑 ไม่มีข้อมูลถูกดึงมาได้ในรอบนี้ ข้ามการทำงานเพื่อป้องกันข้อมูลเดิมเสียหาย")
+        print("🛑 ดึงข้อมูลไม่ได้ครบตามจำนวนครั้งที่กำหนด ข้ามการทำงาน")
         return
         
     old_data = {}
@@ -150,23 +128,24 @@ def main():
             
     updates = []
     for station, d in current_data.items():
-        if station not in old_data or current_data[station] != old_data[station]:
-            
+        # ตรวจสอบการเปลี่ยนแปลง (เช็คทุกฟิลด์เพื่อให้แม่นยำ)
+        if station not in old_data or d != old_data.get(station):
             def get_icon(status):
-                return "✅" if "มี" in status else "❌" if "หมด" in status else "⚪"
+                if "มี" in status: return "✅"
+                if "หมด" in status: return "❌"
+                return "⚪"
 
             msg = f"📍 {station}\n"
             msg += f"⛽ ดีเซล:{get_icon(d['ดีเซล'])} {d['ดีเซล']} | G95:{get_icon(d['G95'])} {d['G95']}\n"
             msg += f"⛽ G91:{get_icon(d['G91'])} {d['G91']} | E20:{get_icon(d['E20'])} {d['E20']}\n"
             
-            trans_icon = "🚚" if "จัดส่ง" in d['รถขนส่ง'] else "✅"
+            trans_icon = "🚚" if "ลงน้ำมัน" in d['รถขนส่ง'] or "จัดส่ง" in d['รถขนส่ง'] else "✅"
             msg += f"{trans_icon} รถขนส่ง: {d['รถขนส่ง']}\n"
             msg += f"🕒 อัปเดตล่าสุด: {d['อัปเดตล่าสุด']}"
-            
             updates.append(msg)
             
     if updates:
-        print(f"🔔 พบการเปลี่ยนแปลง {len(updates)} แห่ง กำลังส่งการแจ้งเตือน...")
+        print(f"🔔 พบการเปลี่ยนแปลง {len(updates)} แห่ง")
         for i in range(0, len(updates), 5):
             chunk = updates[i:i+5]
             final_msg = f"🔔 แจ้งอัปเดตน้ำมัน (อินทร์บุรี)\n⏰ ตรวจสอบเมื่อ: {thai_now}\n\n" + "\n\n".join(chunk)
@@ -176,7 +155,7 @@ def main():
         with open("data.json", "w", encoding="utf-8") as f:
             json.dump(current_data, f, ensure_ascii=False, indent=2)
     else:
-        print("✅ ข้อมูลยังเป็นปัจจุบัน (ไม่มีการเปลี่ยนแปลง)")
+        print("✅ ข้อมูลยังเป็นปัจจุบัน")
 
 if __name__ == "__main__":
     main()
