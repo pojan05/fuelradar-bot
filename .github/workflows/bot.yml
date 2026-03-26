@@ -27,6 +27,9 @@ jobs:
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_TO_ID: ${{ secrets.LINE_TO_ID }}
+          # --- เพิ่ม 2 บรรทัดนี้สำหรับบอทตัวที่สอง ---
+          LINE_TOKEN_2: ${{ secrets.LINE_TOKEN_2 }}
+          LINE_TO_ID_2: ${{ secrets.LINE_TO_ID_2 }}
         run: python main.py
         
       - name: Save Data
