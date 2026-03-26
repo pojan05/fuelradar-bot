@@ -1,7 +1,7 @@
 name: Auto Run Bot
 on:
   schedule:
-    # รันทุก 10 นาที เฉพาะช่วงเวลา 05:00 - 21:59 น. เวลาไทย (UTC 22-23 และ 0-14)
+    # รันทุก 10 นาที เฉพาะช่วงเวลา 05:00 - 21:59 น. เวลาไทย
     - cron: '*/10 0-14,22-23 * * *'
   workflow_dispatch:
 
@@ -12,31 +12,33 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
       
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5 # อัปเดตเป็น v5
         with:
           python-version: '3.10'
           
-      - name: Install Tools
+      - name: Install Dependencies
         run: |
-          # ติดตั้งเครื่องมือพื้นฐานและ pytz สำหรับจัดการเวลาไทย
           pip install requests beautifulsoup4 selenium webdriver-manager pytz
         
-      - name: Run Python Code
+      - name: Run Fuel Radar Bot
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_TO_ID: ${{ secrets.LINE_TO_ID }}
-          # --- เพิ่ม 2 บรรทัดนี้สำหรับบอทตัวที่สอง ---
           LINE_TOKEN_2: ${{ secrets.LINE_TOKEN_2 }}
           LINE_TO_ID_2: ${{ secrets.LINE_TO_ID_2 }}
         run: python main.py
         
-      - name: Save Data
+      - name: Update Data File
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          touch data.json
-          git add data.json
-          git commit -m "update data" || echo "No changes"
-          git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # ตรวจสอบว่ามีไฟล์ data.json หรือไม่ก่อนทำการ commit
+          if [ -f data.json ]; then
+            git add data.json
+            git commit -m "chore: update fuel data [skip ci]" || echo "No changes to commit"
+            git push
+          fi
