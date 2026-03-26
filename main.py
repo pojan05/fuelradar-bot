@@ -14,25 +14,46 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
+# ดึงค่า Secrets บอทตัวที่ 1
 LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TO_ID = os.environ.get("LINE_TO_ID")
+# ดึงค่า Secrets บอทตัวที่ 2
+LINE_TOKEN_2 = os.environ.get("LINE_TOKEN_2")
+LINE_TO_ID_2 = os.environ.get("LINE_TO_ID_2")
+
 DATA_URL = "https://script.google.com/macros/s/AKfycbxflVoeKNYwHDhMFqoZkeKUR0AG5GI4jwfqefySHxXa6MnDdBn7NbTkT4NjN-WbgYQrMQ/exec"
 
 def send_message(text):
     url = 'https://api.line.me/v2/bot/message/push'
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {LINE_TOKEN}'
-    }
-    payload = {
-        "to": LINE_TO_ID,
-        "messages": [{"type": "text", "text": text[:5000]}]
-    }
-    try:
-        res = requests.post(url, headers=headers, json=payload)
-        res.raise_for_status()
-    except Exception as e:
-        print(f"❌ ส่ง LINE ไม่สำเร็จ: {e}")
+    
+    # รวมบอททั้งหมดไว้ใน List เพื่อวนลูปส่งทีเดียว
+    targets = [
+        {"token": LINE_TOKEN, "to_id": LINE_TO_ID, "name": "Bot 1"},
+        {"token": LINE_TOKEN_2, "to_id": LINE_TO_ID_2, "name": "Bot 2 (AlienBot)"}
+    ]
+    
+    for target in targets:
+        token = target["token"]
+        to_id = target["to_id"]
+        bot_name = target["name"]
+        
+        # ข้ามถ้าไม่ได้ใส่ค่า Secret ไว้ (ป้องกัน Error)
+        if not token or not to_id:
+            continue
+            
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}'
+        }
+        payload = {
+            "to": to_id,
+            "messages": [{"type": "text", "text": text[:5000]}]
+        }
+        try:
+            res = requests.post(url, headers=headers, json=payload)
+            res.raise_for_status()
+        except Exception as e:
+            print(f"❌ ส่ง LINE ไม่สำเร็จ ({bot_name}): {e}")
 
 def get_fuel_data():
     print("🔍 เริ่มต้นการดึงข้อมูล (Headless Chrome)...")
