@@ -26,7 +26,7 @@ def send_message(text):
     url = 'https://api.line.me/v2/bot/message/push'
     targets = [
         {"token": LINE_TOKEN, "to_id": LINE_TO_ID, "name": "Bot 1"},
-        {"token": LINE_TOKEN_2, "to_id": LINE_TO_ID_2, "name": "Bot 2 (Alieninburi)"} # ปรับชื่อตามที่คุณเคยแก้ไข [cite: 1]
+        {"token": LINE_TOKEN_2, "to_id": LINE_TO_ID_2, "name": "Bot 2 (Alieninburi)"} 
     ]
     
     for target in targets:
@@ -41,6 +41,23 @@ def send_message(text):
             res.raise_for_status()
         except Exception as e:
             print(f"❌ ส่ง LINE ไม่สำเร็จ ({target['name']}): {e}")
+
+def get_price_diff(new_val, old_val):
+    """ฟังก์ชันคำนวณส่วนต่างราคาน้ำมัน"""
+    if not old_val: return " (ใหม่)"
+    try:
+        # พยายามแปลงเป็นตัวเลขเพื่อคำนวณ
+        n = float(new_val.replace(',', ''))
+        o = float(old_val.replace(',', ''))
+        diff = n - o
+        if diff > 0: return f" (⬆️+{diff:.2f})"
+        elif diff < 0: return f" (⬇️{diff:.2f})"
+        else: return " (คงเดิม)"
+    except ValueError:
+        # กรณีข้อมูลเป็นตัวหนังสือ เช่น "หมด" 
+        if new_val != old_val:
+            return f" (🔄เปลี่ยนจาก {old_val})"
+        return " (คงเดิม)"
 
 def scrape_logic():
     """ฟังก์ชันหลักในการดึงข้อมูลจากเว็บ"""
@@ -67,9 +84,9 @@ def scrape_logic():
         iframe2 = driver.find_element(By.TAG_NAME, "iframe")
         driver.switch_to.frame(iframe2)
         
-        # รอข้อมูลตาราง (เพิ่มเวลารอเป็น 60 วินาทีสำหรับ GitHub)
+        # รอข้อมูลตาราง
         WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.ID, "tbody-dash")))
-        time.sleep(5) # รอให้ JS Render ข้อมูลจนครบ
+        time.sleep(5) 
         
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
@@ -110,9 +127,14 @@ def get_fuel_data_with_retry(max_retries=3):
 
 def main():
     tz = pytz.timezone('Asia/Bangkok')
-    thai_now = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(tz)
+    thai_now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 🕒 เงื่อนไขส่งสรุปตอน 6 โมงเช้า (เช็คว่าเวลาอยู่ช่วง 06:00 - 06:09 น.)
+    is_summary_time = (now.hour == 6 and now.minute < 10)
+    
     print("-" * 30)
-    print(f"🚀 Bot Start: {thai_now}")
+    print(f"🚀 Bot Start: {thai_now_str} (Summary Mode: {is_summary_time})")
     
     current_data = get_fuel_data_with_retry()
     
@@ -128,16 +150,28 @@ def main():
             
     updates = []
     for station, d in current_data.items():
-        # ตรวจสอบการเปลี่ยนแปลง (เช็คทุกฟิลด์เพื่อให้แม่นยำ)
-        if station not in old_data or d != old_data.get(station):
+        old = old_data.get(station, {})
+        has_changed = (station not in old_data) or (d != old)
+        
+        # ตรวจสอบการเปลี่ยนแปลง หรือ ถ้าเป็นโหมดสรุปตอนเช้า ให้ดึงข้อมูลมาทำข้อความเลย
+        if is_summary_time or has_changed:
             def get_icon(status):
                 if "มี" in status: return "✅"
                 if "หมด" in status: return "❌"
                 return "⚪"
 
-            msg = f"📍 {station}\n"
-            msg += f"⛽ ดีเซล:{get_icon(d['ดีเซล'])} {d['ดีเซล']} | G95:{get_icon(d['G95'])} {d['G95']}\n"
-            msg += f"⛽ G91:{get_icon(d['G91'])} {d['G91']} | E20:{get_icon(d['E20'])} {d['E20']}\n"
+            # ถ้าเป็นรอบ 6 โมงเช้า ให้แสดงส่วนต่างราคาด้วย
+            diff_diesel = get_price_diff(d['ดีเซล'], old.get('ดีเซล')) if is_summary_time else ""
+            diff_g95 = get_price_diff(d['G95'], old.get('G95')) if is_summary_time else ""
+            diff_g91 = get_price_diff(d['G91'], old.get('G91')) if is_summary_time else ""
+            diff_e20 = get_price_diff(d['E20'], old.get('E20')) if is_summary_time else ""
+
+            icon = "📊" if is_summary_time else "📍"
+            msg = f"{icon} {station}\n"
+            msg += f"⛽ ดีเซล:{get_icon(d['ดีเซล'])} {d['ดีเซล']}{diff_diesel}\n"
+            msg += f"⛽ G95:{get_icon(d['G95'])} {d['G95']}{diff_g95}\n"
+            msg += f"⛽ G91:{get_icon(d['G91'])} {d['G91']}{diff_g91}\n"
+            msg += f"⛽ E20:{get_icon(d['E20'])} {d['E20']}{diff_e20}\n"
             
             trans_icon = "🚚" if "ลงน้ำมัน" in d['รถขนส่ง'] or "จัดส่ง" in d['รถขนส่ง'] else "✅"
             msg += f"{trans_icon} รถขนส่ง: {d['รถขนส่ง']}\n"
@@ -145,10 +179,12 @@ def main():
             updates.append(msg)
             
     if updates:
-        print(f"🔔 พบการเปลี่ยนแปลง {len(updates)} แห่ง")
+        print(f"🔔 ส่งข้อมูล: {len(updates)} แห่ง")
+        header_title = "📊 รายงานสรุปราคาน้ำมันเช้านี้" if is_summary_time else "🔔 แจ้งอัปเดตน้ำมัน"
+        
         for i in range(0, len(updates), 5):
             chunk = updates[i:i+5]
-            final_msg = f"🔔 แจ้งอัปเดตน้ำมัน (อินทร์บุรี)\n⏰ ตรวจสอบเมื่อ: {thai_now}\n\n" + "\n\n".join(chunk)
+            final_msg = f"{header_title} (อินทร์บุรี)\n⏰ ตรวจสอบเมื่อ: {thai_now_str}\n\n" + "\n\n".join(chunk)
             send_message(final_msg)
             time.sleep(2)
             
