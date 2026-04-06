@@ -23,24 +23,30 @@ LINE_TO_ID_2 = os.environ.get("LINE_TO_ID_2")
 DATA_URL = "https://script.google.com/macros/s/AKfycbxflVoeKNYwHDhMFqoZkeKUR0AG5GI4jwfqefySHxXa6MnDdBn7NbTkT4NjN-WbgYQrMQ/exec"
 
 def send_message(text):
-    url = 'https://api.line.me/v2/bot/message/push'
+    # 1. เปลี่ยน URL เป็น broadcast
+    url = 'https://api.line.me/v2/bot/message/broadcast'
+    
+    # 2. ไม่จำเป็นต้องระบุ to_id แล้ว ใช้แค่ Token ของบอทแต่ละตัว
     targets = [
-        {"token": LINE_TOKEN, "to_id": LINE_TO_ID, "name": "Bot 1"},
-        {"token": LINE_TOKEN_2, "to_id": LINE_TO_ID_2, "name": "Bot 2 (Alieninburi)"} 
+        {"token": LINE_TOKEN, "name": "Bot 1"},
+        {"token": LINE_TOKEN_2, "name": "Bot 2 (Alieninburi)"} 
     ]
     
     for target in targets:
         token = target["token"]
-        to_id = target["to_id"]
-        if not token or not to_id: continue
+        if not token: continue
             
         headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
-        payload = {"to": to_id, "messages": [{"type": "text", "text": text[:5000]}]}
+        
+        # 3. ลบ "to": to_id ออกจาก payload
+        payload = {"messages": [{"type": "text", "text": text[:5000]}]}
+        
         try:
             res = requests.post(url, headers=headers, json=payload)
             res.raise_for_status()
+            print(f"✅ บรอดแคสต์ข้อความสำเร็จ ({target['name']})")
         except Exception as e:
-            print(f"❌ ส่ง LINE ไม่สำเร็จ ({target['name']}): {e}")
+            print(f"❌ บรอดแคสต์ LINE ไม่สำเร็จ ({target['name']}): {e}")
 
 def get_price_diff(new_val, old_val):
     """ฟังก์ชันคำนวณส่วนต่างราคาน้ำมัน"""
