@@ -1,8 +1,8 @@
 name: Auto Run Bot
 on:
   schedule:
-    # รันทุก 10 นาที เฉพาะช่วงเวลา 05:00 - 21:59 น. เวลาไทย
-    - cron: '*/10 0-14,22-23 * * *'
+    # รันเวลา 23:00 UTC (06:00 ไทย) และ 10:00 UTC (17:00 ไทย)
+    - cron: '0 23,10 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,27 +16,29 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v5 # อัปเดตเป็น v5
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           
       - name: Install Dependencies
+        # เพิ่ม google-genai และ earthengine-api สำหรับดึงข้อมูลมาแจ้งใน LINE
         run: |
-          pip install requests beautifulsoup4 selenium webdriver-manager pytz
+          pip install requests beautifulsoup4 selenium webdriver-manager pytz google-genai earthengine-api
         
-      - name: Run Fuel Radar Bot
+      - name: Run Fuel & Info Bot
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
-          LINE_TO_ID: ${{ secrets.LINE_TO_ID }}
           LINE_TOKEN_2: ${{ secrets.LINE_TOKEN_2 }}
-          LINE_TO_ID_2: ${{ secrets.LINE_TO_ID_2 }}
+          # เพิ่มตัวแปรสำหรับระบบวิเคราะห์ (ต้องไปใส่ใน Secrets ของโปรเจกต์นี้ด้วย)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EE_JSON_KEY: ${{ secrets.EE_JSON_KEY }}
+          TOMORROW_API_KEY: ${{ secrets.TOMORROW_API_KEY }}
         run: python main.py
         
       - name: Update Data File
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # ตรวจสอบว่ามีไฟล์ data.json หรือไม่ก่อนทำการ commit
           if [ -f data.json ]; then
             git add data.json
             git commit -m "chore: update fuel data [skip ci]" || echo "No changes to commit"
