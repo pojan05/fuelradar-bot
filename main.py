@@ -200,7 +200,6 @@ def get_weather():
     return temp, pm25, rain_prob, humidity, wind, uv
 
 def get_inburi_data():
-    # ใช้ Selenium ดึงระดับน้ำเพื่อความเสถียรสูงสุด (แก้ปัญหา API กลางล่ม และรองรับเว็บสิงห์บุรี)
     water_level, bank_level = None, 15.10
     url = f"https://singburi.thaiwater.net/wl?cb={random.randint(10000, 99999)}"
     
@@ -223,14 +222,24 @@ def get_inburi_data():
                 numeric_values = []
                 for cell in cols:
                     text = cell.get_text(strip=True)
-                    try:
-                        cleaned = re.sub(r"[ ,]", "", text)
-                        cleaned = re.sub(r"[^0-9\.\-]", "", cleaned)
-                        if cleaned and cleaned != "-":
-                            numeric_values.append(float(cleaned))
-                    except: continue
+                    
+                    # 🚀 [แก้ไขที่นี่] ข้ามคอลัมน์ที่เป็น เวลา (เช่น 08:20 น.) หรือ วันที่ ทันที ป้องกันการดึงตัวเลขผิด
+                    if ":" in text or "/" in text:
+                        continue
                         
+                    try:
+                        # ลบเครื่องหมายลูกน้ำ และจับเฉพาะตัวเลขที่มีทศนิยมหรือค่าติดลบ
+                        cleaned = text.replace(",", "")
+                        match = re.search(r"(\-?\d+\.\d+|\-?\d+)", cleaned)
+                        if match:
+                            val = float(match.group(1))
+                            # ป้องกันรหัสสถานี (ระดับน้ำ/ตลิ่งปกติจะไม่เกิน 50 เมตร)
+                            if val < 50:
+                                numeric_values.append(val)
+                    except: continue
+                    
                 if numeric_values:
+                    # ตัวเลขที่เหลือตัวแรกสุด จะเป็นระดับน้ำที่แท้จริง (เช่น 4.88)
                     water_level = numeric_values[0] 
                     break
     except Exception as e:
@@ -268,7 +277,6 @@ def process_inburi_report():
     elif hotspots == 0: hotspot_text = "0 จุด (ไม่พบการเผาไหม้ในรัศมี 10 กม.)"
     else: hotspot_text = f"พบ {hotspots} จุด (เฝ้าระวังไฟป่า/การเผาไหม้ในรัศมี 10 กม.)"
 
-    # นำคำสั่งวิเคราะห์กลับมาเต็มรูปแบบ เพื่อให้ AI แนะนำชาวบ้านเหมือนเดิม
     prompt = f"""
     คุณคือแอดมินเพจ "อินทร์บุรีรอดมั้ย" ที่คอยแจ้งข่าวสารผ่าน LINE ให้ชาวบ้านอินทร์บุรีแบบเป็นกันเอง ภาษาอ่านง่าย ไม่เป็นทางการเกินไป
     
