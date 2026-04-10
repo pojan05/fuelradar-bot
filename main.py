@@ -28,6 +28,11 @@ LINE_TOKEN = os.environ.get("LINE_TOKEN")
 LINE_TOKEN_2 = os.environ.get("LINE_TOKEN_2")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
 
+# 🚨🚨🚨 สวิตช์เปิด-ปิด โหมดทดสอบ 🚨🚨🚨
+# True  = แค่แสดงข้อความบนหน้าจอ (ไม่ส่งเข้า LINE จริง)
+# False = ปล่อยข้อความส่งเข้า LINE ตามปกติ
+TEST_MODE = True  
+
 tz = pytz.timezone('Asia/Bangkok')
 now = datetime.now(tz)
 THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
@@ -41,6 +46,12 @@ is_morning = now.hour == 6
 # 🟢 ฟังก์ชันส่ง LINE
 # ==========================================
 def send_line_message(text):
+    # ดักไว้ก่อนเลย ถ้าเปิด Test Mode ให้ปริ้นออกจออย่างเดียว
+    if TEST_MODE:
+        print(f"\n🛑 [TEST MODE] ระบบระงับการส่ง LINE จริง! ข้อความที่จะถูกส่งคือ:")
+        print(f"{'='*40}\n{text}\n{'='*40}\n")
+        return # จบฟังก์ชันทันที ไม่ต้องทำโค้ดส่ง API ด้านล่าง
+
     url = 'https://api.line.me/v2/bot/message/broadcast'
     targets = [
         {"token": LINE_TOKEN, "name": "Bot 1"},
@@ -132,8 +143,10 @@ def process_fuel_report():
             final_msg = f"📊 สรุปราคาน้ำมันอินทร์บุรี\n⏰ {now.strftime('%d/%m/%Y %H:%M')}\n\n" + "\n\n".join(chunk)
             send_line_message(final_msg)
             time.sleep(2)
-        with open("data.json", "w", encoding="utf-8") as f:
-            json.dump(current_data, f, ensure_ascii=False, indent=2)
+        # ถ้ารันใน Test Mode เราจะไม่เขียนทับไฟล์ data.json เพื่อให้ตอนส่งจริงมันยังเปรียบเทียบราคาเดิมได้
+        if not TEST_MODE:
+            with open("data.json", "w", encoding="utf-8") as f:
+                json.dump(current_data, f, ensure_ascii=False, indent=2)
 
 # ==========================================
 # 🌤️ ส่วนที่ 2: ระบบข้อมูลอินทร์บุรี (วิเคราะห์โดย AI)
@@ -223,23 +236,19 @@ def get_inburi_data():
                 for cell in cols:
                     text = cell.get_text(strip=True)
                     
-                    # 🚀 [แก้ไขที่นี่] ข้ามคอลัมน์ที่เป็น เวลา (เช่น 08:20 น.) หรือ วันที่ ทันที ป้องกันการดึงตัวเลขผิด
                     if ":" in text or "/" in text:
                         continue
                         
                     try:
-                        # ลบเครื่องหมายลูกน้ำ และจับเฉพาะตัวเลขที่มีทศนิยมหรือค่าติดลบ
                         cleaned = text.replace(",", "")
                         match = re.search(r"(\-?\d+\.\d+|\-?\d+)", cleaned)
                         if match:
                             val = float(match.group(1))
-                            # ป้องกันรหัสสถานี (ระดับน้ำ/ตลิ่งปกติจะไม่เกิน 50 เมตร)
                             if val < 50:
                                 numeric_values.append(val)
                     except: continue
                     
                 if numeric_values:
-                    # ตัวเลขที่เหลือตัวแรกสุด จะเป็นระดับน้ำที่แท้จริง (เช่น 4.88)
                     water_level = numeric_values[0] 
                     break
     except Exception as e:
