@@ -1,8 +1,8 @@
 name: Auto Run Bot
 on:
   schedule:
-    # รันเวลา 23:00 UTC (06:00 ไทย) และ 10:00 UTC (17:00 ไทย)
-    - cron: '0 23,10 * * *'
+    # รันเวลา 07:00, 11:00, และ 17:00 (เวลาไทย)
+    - cron: '0 0,4,10 * * *'
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,6 @@ jobs:
           python-version: '3.10'
           
       - name: Install Dependencies
-        # เพิ่ม google-genai และ earthengine-api สำหรับดึงข้อมูลมาแจ้งใน LINE
         run: |
           pip install requests beautifulsoup4 selenium webdriver-manager pytz google-genai earthengine-api
         
@@ -29,7 +28,6 @@ jobs:
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           LINE_TOKEN_2: ${{ secrets.LINE_TOKEN_2 }}
-          # เพิ่มตัวแปรสำหรับระบบวิเคราะห์ (ต้องไปใส่ใน Secrets ของโปรเจกต์นี้ด้วย)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EE_JSON_KEY: ${{ secrets.EE_JSON_KEY }}
           TOMORROW_API_KEY: ${{ secrets.TOMORROW_API_KEY }}
