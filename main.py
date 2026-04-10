@@ -31,7 +31,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 🚨🚨🚨 สวิตช์เปิด-ปิด โหมดทดสอบ 🚨🚨🚨
 # True  = แค่แสดงข้อความบนหน้าจอ (ไม่ส่งเข้า LINE จริง)
 # False = ปล่อยข้อความส่งเข้า LINE ตามปกติ
-TEST_MODE = True  
+TEST_MODE = False  
 
 tz = pytz.timezone('Asia/Bangkok')
 now = datetime.now(tz)
